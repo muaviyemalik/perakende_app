@@ -26,3 +26,8 @@ flutter:
   uses-material-design: true
   assets:
     - .env
+
+flutter_launcher_icons:
+  image_path: "assets/icon/asil_logo.png"
+  android: true
+  ios: true
