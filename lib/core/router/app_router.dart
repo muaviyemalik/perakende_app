@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../features/admin/presentation/screens/add_product_screen.dart';
 import '../../features/admin/presentation/screens/admin_dashboard_screen.dart';
+import '../../features/admin/presentation/screens/sales_history_screen.dart';
 import '../../features/auth/presentation/providers/auth_provider.dart';
 import '../../features/auth/presentation/screens/employee_dashboard_screen.dart';
 import '../../features/auth/presentation/screens/login_screen.dart';
@@ -101,6 +102,12 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: '/add-product',
         builder: (context, state) {
           return const AddProductScreen();
+        },
+      ),
+      GoRoute(
+        path: '/sales-history',
+        builder: (context, state) {
+          return const SalesHistoryScreen();
         },
       ),
     ],

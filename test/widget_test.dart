@@ -42,4 +42,21 @@ void main() {
     expect(find.text('Yönetim'), findsOneWidget);
     expect(find.text('Profil'), findsOneWidget);
   });
+
+  testWidgets('Admin summary tab shows sales history button', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      const ProviderScope(
+        child: MaterialApp(
+          home: AdminDashboardScreen(),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Özet'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Satış Geçmişini Gör'), findsOneWidget);
+  });
 }
