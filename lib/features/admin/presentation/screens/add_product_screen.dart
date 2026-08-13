@@ -1,0 +1,334 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
+
+import '../../../../core/providers/supabase_provider.dart';
+
+class AddProductScreen extends ConsumerStatefulWidget {
+  const AddProductScreen({super.key});
+
+  @override
+  ConsumerState<AddProductScreen> createState() => _AddProductScreenState();
+}
+
+class _AddProductScreenState extends ConsumerState<AddProductScreen> {
+  final _formKey = GlobalKey<FormState>();
+  late TextEditingController _nameController;
+  late TextEditingController _priceController;
+  late TextEditingController _stockController;
+  late TextEditingController _barcodeController;
+  bool _isLoading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameController = TextEditingController();
+    _priceController = TextEditingController();
+    _stockController = TextEditingController();
+    _barcodeController = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _priceController.dispose();
+    _stockController.dispose();
+    _barcodeController.dispose();
+    super.dispose();
+  }
+
+  String? _validateName(String? value) {
+    if (value == null || value.isEmpty) {
+      return 'Ürün adı gerekli';
+    }
+    return null;
+  }
+
+  String? _validatePrice(String? value) {
+    if (value == null || value.isEmpty) {
+      return 'Fiyat gerekli';
+    }
+    if (double.tryParse(value) == null) {
+      return 'Geçerli bir fiyat girin';
+    }
+    return null;
+  }
+
+  String? _validateStock(String? value) {
+    if (value == null || value.isEmpty) {
+      return 'Stok gerekli';
+    }
+    if (int.tryParse(value) == null) {
+      return 'Geçerli bir stok miktarı girin';
+    }
+    return null;
+  }
+
+  String? _validateBarcode(String? value) {
+    if (value == null || value.isEmpty) {
+      return 'Barkod gerekli';
+    }
+    return null;
+  }
+
+  Future<void> _handleSaveProduct() async {
+    if (!_formKey.currentState!.validate()) {
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
+    try {
+      final supabase = ref.read(supabaseClientProvider);
+      await supabase.from('products').insert({
+        'name': _nameController.text.trim(),
+        'price': double.parse(_priceController.text),
+        'stock': int.parse(_stockController.text),
+        'barcode': _barcodeController.text.trim(),
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Ürün başarıyla eklendi'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 2),
+          ),
+        );
+        // Sayfayı kapat ve dashboard'a dön
+        context.pop();
+      }
+    } on Exception catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Hata: $e'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  void _openBarcodeScanner() {
+    final scannerController = MobileScannerController();
+    String scannedBarcode = 'Bekleniyor...';
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            return Container(
+              height: MediaQuery.of(context).size.height * 0.7,
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+              ),
+              child: Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 12),
+                    child: Row(
+                      children: [
+                        const Expanded(
+                          child: Text(
+                            'Barkod Okut',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          onPressed: () => Navigator.pop(sheetContext),
+                          icon: const Icon(Icons.close),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    child: MobileScanner(
+                      controller: scannerController,
+                      onDetect: (capture) {
+                        final List<Barcode> barcodes = capture.barcodes;
+                        for (final barcode in barcodes) {
+                          if (barcode.rawValue != null &&
+                              barcode.rawValue!.isNotEmpty) {
+                            setState(() {
+                              _barcodeController.text = barcode.rawValue!;
+                              _barcodeController.selection =
+                                  TextSelection.fromPosition(
+                                TextPosition(
+                                    offset: _barcodeController.text.length),
+                              );
+                            });
+                            setSheetState(() {
+                              scannedBarcode = barcode.rawValue!;
+                            });
+                            Navigator.pop(sheetContext);
+                            return;
+                          }
+                        }
+                      },
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.shade50,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.blue.shade200),
+                      ),
+                      child: Text(
+                        scannedBarcode,
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.blue.shade700,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Yeni Ürün Ekle'),
+        elevation: 0,
+      ),
+      body: SingleChildScrollView(
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Form(
+            key: _formKey,
+            child: Column(
+              children: [
+                const SizedBox(height: 16),
+                // Ürün Adı
+                TextFormField(
+                  controller: _nameController,
+                  enabled: !_isLoading,
+                  decoration: InputDecoration(
+                    labelText: 'Ürün Adı',
+                    hintText: 'Örn: Elma',
+                    prefixIcon: const Icon(Icons.shopping_bag),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  validator: _validateName,
+                ),
+                const SizedBox(height: 16),
+                // Fiyat
+                TextFormField(
+                  controller: _priceController,
+                  enabled: !_isLoading,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  decoration: InputDecoration(
+                    labelText: 'Fiyat (₺)',
+                    hintText: 'Örn: 10.99',
+                    prefixIcon: const Icon(Icons.attach_money),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  validator: _validatePrice,
+                ),
+                const SizedBox(height: 16),
+                // Başlangıç Stoku
+                TextFormField(
+                  controller: _stockController,
+                  enabled: !_isLoading,
+                  keyboardType: TextInputType.number,
+                  decoration: InputDecoration(
+                    labelText: 'Başlangıç Stoku',
+                    hintText: 'Örn: 100',
+                    prefixIcon: const Icon(Icons.inventory_2),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  validator: _validateStock,
+                ),
+                const SizedBox(height: 16),
+                // Barkod
+                TextFormField(
+                  controller: _barcodeController,
+                  enabled: !_isLoading,
+                  decoration: InputDecoration(
+                    labelText: 'Barkod',
+                    hintText: 'Örn: 8680000000000',
+                    prefixIcon: const Icon(Icons.qr_code),
+                    suffixIcon: IconButton(
+                      icon: const Icon(Icons.camera_alt),
+                      onPressed: _isLoading ? null : _openBarcodeScanner,
+                      tooltip: 'Barkod Okut',
+                    ),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  validator: _validateBarcode,
+                ),
+                const SizedBox(height: 32),
+                // Ürünü Kaydet Butonu
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: _isLoading ? null : _handleSaveProduct,
+                    icon: _isLoading
+                        ? const SizedBox(
+                            height: 20,
+                            width: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              valueColor:
+                                  AlwaysStoppedAnimation<Color>(Colors.white),
+                            ),
+                          )
+                        : const Icon(Icons.check),
+                    label: Text(
+                      _isLoading ? 'Kaydediliyor...' : 'Ürünü Kaydet',
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      backgroundColor: Colors.green,
+                      foregroundColor: Colors.white,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}

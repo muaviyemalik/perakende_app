@@ -5,18 +5,41 @@
 // gestures. You can also use WidgetTester to find child widgets in the widget
 // tree, read text, and verify that the values of widget properties are correct.
 
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:perakende_app/app.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:perakende_app/app.dart';
+import 'package:perakende_app/features/admin/presentation/screens/admin_dashboard_screen.dart';
 
 void main() {
   testWidgets('App widget test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
     await tester.pumpWidget(
       const ProviderScope(child: App()),
     );
 
-    // Verify that the app renders without crashing
     expect(find.byType(App), findsOneWidget);
+  });
+
+  testWidgets('Admin dashboard shows a fixed 4-tab navigation', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      const ProviderScope(
+        child: MaterialApp(
+          home: AdminDashboardScreen(),
+        ),
+      ),
+    );
+
+    final bottomNavigationBar = tester.widget<BottomNavigationBar>(
+      find.byType(BottomNavigationBar),
+    );
+
+    expect(bottomNavigationBar.type, BottomNavigationBarType.fixed);
+    expect(bottomNavigationBar.items.length, 4);
+    expect(find.text('Okuyucu'), findsOneWidget);
+    expect(find.text('Özet'), findsOneWidget);
+    expect(find.text('Yönetim'), findsOneWidget);
+    expect(find.text('Profil'), findsOneWidget);
   });
 }

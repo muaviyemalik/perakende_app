@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../../../core/providers/supabase_provider.dart';
 
@@ -14,6 +16,14 @@ class AdminDashboardScreen extends ConsumerStatefulWidget {
 class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
   int _selectedIndex = 0;
   bool _isLoggingOut = false;
+  String _scannedBarcode = 'Bekleniyor...';
+  final MobileScannerController _cameraController = MobileScannerController();
+
+  @override
+  void dispose() {
+    _cameraController.dispose();
+    super.dispose();
+  }
 
   Future<void> _handleLogout() async {
     setState(() => _isLoggingOut = true);
@@ -35,6 +45,72 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
         setState(() => _isLoggingOut = false);
       }
     }
+  }
+
+  Widget _buildScannerTab() {
+    return Column(
+      children: [
+        Expanded(
+          child: MobileScanner(
+            controller: _cameraController,
+            onDetect: (capture) {
+              final List<Barcode> barcodes = capture.barcodes;
+              for (final barcode in barcodes) {
+                if (barcode.rawValue != null) {
+                  setState(() {
+                    _scannedBarcode = barcode.rawValue!;
+                  });
+                  break;
+                }
+              }
+            },
+          ),
+        ),
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Card(
+              elevation: 4,
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Son Okutulan Barkod:',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: Colors.grey,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.shade50,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.blue.shade200),
+                      ),
+                      child: Text(
+                        _scannedBarcode,
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.blue.shade700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
   }
 
   Widget _buildSummaryTab() {
@@ -196,12 +272,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
           children: [
             ElevatedButton.icon(
               onPressed: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Yeni Ürün Ekle sayfası yakında'),
-                    duration: Duration(seconds: 2),
-                  ),
-                );
+                context.push('/add-product');
               },
               icon: const Icon(Icons.add_circle_outline, size: 28),
               label: const Text(
@@ -301,6 +372,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
   @override
   Widget build(BuildContext context) {
     final List<Widget> pages = [
+      _buildScannerTab(),
       _buildSummaryTab(),
       _buildManagementTab(),
       _buildProfileTab(),
@@ -313,11 +385,16 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
       ),
       body: pages[_selectedIndex],
       bottomNavigationBar: BottomNavigationBar(
+        type: BottomNavigationBarType.fixed,
         currentIndex: _selectedIndex,
         onTap: (index) {
           setState(() => _selectedIndex = index);
         },
         items: const [
+          BottomNavigationBarItem(
+            icon: Icon(Icons.qr_code_scanner),
+            label: 'Okuyucu',
+          ),
           BottomNavigationBarItem(
             icon: Icon(Icons.dashboard),
             label: 'Özet',

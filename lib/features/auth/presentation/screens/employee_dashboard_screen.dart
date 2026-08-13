@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../../../core/providers/supabase_provider.dart';
 import '../providers/auth_provider.dart';
@@ -16,6 +17,8 @@ class _EmployeeDashboardScreenState
     extends ConsumerState<EmployeeDashboardScreen> {
   int _selectedIndex = 0;
   bool _isLoggingOut = false;
+  String _scannedBarcode = 'Bekleniyor...';
+  final MobileScannerController _cameraController = MobileScannerController();
 
   Future<void> _handleLogout() async {
     setState(() => _isLoggingOut = true);
@@ -39,42 +42,115 @@ class _EmployeeDashboardScreenState
     }
   }
 
+  @override
+  void dispose() {
+    _cameraController.dispose();
+    super.dispose();
+  }
+
   Widget _buildScannerTab() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          ElevatedButton.icon(
-            onPressed: () {
-              // TODO: Kamera entegrasyonu yapılacak
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Kamera özelliği yakında eklenecek'),
-                  duration: Duration(seconds: 2),
-                ),
-              );
+    return Column(
+      children: [
+        // Üst yarı: MobileScanner
+        Expanded(
+          child: MobileScanner(
+            controller: _cameraController,
+            onDetect: (capture) {
+              final List<Barcode> barcodes = capture.barcodes;
+              for (final barcode in barcodes) {
+                if (barcode.rawValue != null) {
+                  setState(() {
+                    _scannedBarcode = barcode.rawValue!;
+                  });
+                  break;
+                }
+              }
             },
-            icon: const Icon(Icons.qr_code_scanner, size: 32),
-            label: const Text(
-              'Barkod Okut',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            ),
-            style: ElevatedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 48,
-                vertical: 24,
+          ),
+        ),
+        // Alt yarı: Okunan Barkod Bilgisi
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Card(
+              elevation: 4,
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Son Okutulan Barkod:',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: Colors.grey,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.shade50,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.blue.shade200),
+                      ),
+                      child: Text(
+                        _scannedBarcode,
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.blue.shade700,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    const Divider(),
+                    const SizedBox(height: 16),
+                    const Text(
+                      'Ürün Bilgileri:',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: Colors.grey,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'Ürün: -',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Colors.grey.shade700,
+                          ),
+                        ),
+                        Text(
+                          'Fiyat: -',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Colors.grey.shade700,
+                          ),
+                        ),
+                        Text(
+                          'Stok: -',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Colors.grey.shade700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
-              backgroundColor: Colors.blue,
-              foregroundColor: Colors.white,
             ),
           ),
-          const SizedBox(height: 16),
-          const Text(
-            'Ürün barkodunu okumak için butona basın',
-            style: TextStyle(fontSize: 14, color: Colors.grey),
-          ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
