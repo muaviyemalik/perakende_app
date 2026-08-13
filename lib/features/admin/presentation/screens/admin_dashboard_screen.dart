@@ -7,6 +7,7 @@ import '../../../../core/providers/supabase_provider.dart';
 import '../../../../providers/cart_provider.dart';
 import '../../../../providers/dashboard_stats_provider.dart';
 import '../../../../providers/product_provider.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 class AdminDashboardScreen extends ConsumerStatefulWidget {
   const AdminDashboardScreen({super.key});
@@ -21,10 +22,51 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
   bool _isLoggingOut = false;
   bool _isCompletingSale = false;
   String _scannedBarcode = '';
+  RealtimeChannel? _dashboardChannel;
   final MobileScannerController _cameraController = MobileScannerController();
 
   @override
+  void initState() {
+    super.initState();
+    _setupDashboardRealtime();
+  }
+
+  void _setupDashboardRealtime() {
+    final supabase = ref.read(supabaseClientProvider);
+
+    _dashboardChannel = supabase
+        .channel('admin-dashboard-realtime')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'products',
+          callback: (payload) {
+            ref.invalidate(dashboardStatsProvider);
+            ref.invalidate(productByBarcodeProvider);
+          },
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'sales',
+          callback: (payload) {
+            ref.invalidate(dashboardStatsProvider);
+          },
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'sale_items',
+          callback: (payload) {
+            ref.invalidate(dashboardStatsProvider);
+          },
+        )
+        .subscribe();
+  }
+
+  @override
   void dispose() {
+    _dashboardChannel?.unsubscribe();
     _cameraController.dispose();
     super.dispose();
   }
@@ -528,41 +570,27 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
                             padding: EdgeInsets.zero,
                             children: [
                               _buildStatCard(
-                                icon: Icons.inventory_2,
+                                icon: Icons.inventory,
                                 label: 'Toplam Ürün',
                                 value: totalProducts.toString(),
-                                color: Colors.blue,
-                                onTap: () {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                      content: Text(
-                                        'Ürünleri düzenlemek için alt menüden Yönetim sekmesine geçebilirsiniz.',
-                                      ),
-                                      duration: Duration(seconds: 3),
-                                    ),
-                                  );
-                                },
+                                color: Colors.blueAccent, // Canlı mavi
+                                onTap: () =>
+                                    _showAllProductsBottomSheet(context),
                               ),
                               _buildStatCard(
                                 icon: Icons.warning,
                                 label: 'Kritik Stok',
                                 value: criticalStock.toString(),
-                                color: Colors.red,
-                                onTap: () {
-                                  _showCriticalProductsBottomSheet(
-                                    context,
-                                    criticalProductsList,
-                                  );
-                                },
+                                color: Colors.redAccent, // Canlı kırmızı
+                                onTap: () => _showCriticalProductsBottomSheet(
+                                    context, criticalProductsList),
                               ),
                               _buildStatCard(
-                                icon: Icons.trending_up,
-                                label: 'Bugünkü Ciro (₺)',
-                                value: dailyRevenue.toStringAsFixed(2),
-                                color: Colors.green,
-                                onTap: () {
-                                  context.push('/sales-history');
-                                },
+                                icon: Icons.attach_money,
+                                label: 'Bugünkü Ciro',
+                                value: '₺$dailyRevenue',
+                                color: Colors.green, // Canlı yeşil
+                                onTap: () => context.push('/sales-history'),
                               ),
                             ],
                           );
@@ -666,133 +694,58 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
     required String label,
     required String value,
     required Color color,
-    VoidCallback? onTap,
+    required VoidCallback onTap,
   }) {
-    return Card(
-      color: color.withValues(alpha: 0.08),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Card(
+        color: color,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        elevation: 4,
         child: Padding(
-          padding: const EdgeInsets.all(8),
-          child: Stack(
+          // İç boşluğu 12'den 8'e düşürdük, kart rahatlasın
+          padding: const EdgeInsets.all(8.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min, // Sadece gerektiği kadar yer kapla
             children: [
-              Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(icon, color: color, size: 24),
-                  const SizedBox(height: 6),
-                  Text(
-                    label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 12, color: Colors.grey),
-                  ),
-                  const SizedBox(height: 6),
-                  FittedBox(
-                    fit: BoxFit.scaleDown,
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      value,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
+              Icon(icon,
+                  size: 28, color: Colors.white), // İkon 32'den 28'e düştü
+              const SizedBox(height: 4),
+              Flexible(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    value,
+                    style: const TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.bold,
-                        color: color,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              if (onTap != null)
-                Positioned(
-                  bottom: 8,
-                  right: 8,
-                  child: Icon(
-                    Icons.chevron_right,
-                    color: color.withValues(alpha: 0.5),
-                    size: 20,
+                        color: Colors.white),
+                    maxLines: 1,
                   ),
                 ),
+              ),
+              const SizedBox(height: 2),
+              Flexible(
+                child: Text(
+                  label,
+                  style: const TextStyle(fontSize: 12, color: Colors.white70),
+                  textAlign: TextAlign.center,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              // Spacer'ı sildik, yerine direk oku koyduk
+              const Align(
+                alignment: Alignment.bottomRight,
+                child:
+                    Icon(Icons.chevron_right, color: Colors.white54, size: 18),
+              )
             ],
           ),
         ),
       ),
-    );
-  }
-
-  void _showCriticalProductsBottomSheet(
-    BuildContext context,
-    List<Map<String, dynamic>> criticalProductsList,
-  ) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (sheetContext) {
-        return Container(
-          height: MediaQuery.of(context).size.height * 0.75,
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-          ),
-          child: SafeArea(
-            child: Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Text(
-                    'Kritik Stoktaki Ürünler',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                              fontWeight: FontWeight.bold,
-                            ) ??
-                        const TextStyle(
-                          fontSize: 22,
-                          fontWeight: FontWeight.bold,
-                        ),
-                  ),
-                ),
-                Expanded(
-                  child: criticalProductsList.isEmpty
-                      ? const Center(
-                          child: Text(
-                            'Kritik seviyede ürün bulunmuyor.',
-                            style: TextStyle(fontSize: 16, color: Colors.grey),
-                          ),
-                        )
-                      : ListView.builder(
-                          itemCount: criticalProductsList.length,
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
-                          itemBuilder: (context, index) {
-                            final product = criticalProductsList[index];
-                            final productName =
-                                product['name'] ?? 'Bilinmeyen Ürün';
-                            final stock = product['stock'] ?? 0;
-
-                            return ListTile(
-                              leading: const Icon(
-                                Icons.warning_amber,
-                                color: Colors.red,
-                              ),
-                              title: Text(productName.toString()),
-                              trailing: Text(
-                                'Kalan Stok: $stock',
-                                style: const TextStyle(
-                                  color: Colors.red,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            );
-                          },
-                        ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
     );
   }
 
@@ -966,6 +919,112 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  void _showAllProductsBottomSheet(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (context) {
+        return SizedBox(
+          height: MediaQuery.of(context).size.height *
+              0.7, // Ekranın %70'ini kaplar
+          child: Column(
+            children: [
+              const Padding(
+                padding: EdgeInsets.all(16.0),
+                child: Text('Tüm Ürünler',
+                    style:
+                        TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+              ),
+              Expanded(
+                child: FutureBuilder(
+                  future: Supabase.instance.client
+                      .from('products')
+                      .select()
+                      .order('name'),
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+                    final products = snapshot.data as List<dynamic>? ?? [];
+                    if (products.isEmpty) {
+                      return const Center(
+                          child: Text('Sistemde ürün bulunmuyor.'));
+                    }
+                    return ListView.builder(
+                      itemCount: products.length,
+                      itemBuilder: (context, index) {
+                        final product = products[index];
+                        return ListTile(
+                          title: Text(product['product_name'] ??
+                              product['name'] ??
+                              'Bilinmeyen Ürün'),
+                          trailing: Text('Stok: ${product['stock']}',
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.bold, fontSize: 16)),
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _showCriticalProductsBottomSheet(
+      BuildContext context, List<dynamic> criticalProducts) {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (context) {
+        return Column(
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(16.0),
+              child: Text('Kritik Stoktaki Ürünler',
+                  style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.redAccent)),
+            ),
+            Expanded(
+              child: criticalProducts.isEmpty
+                  ? const Center(
+                      child: Text('Kritik seviyede ürün yok, harika!',
+                          style: TextStyle(fontSize: 16)))
+                  : ListView.builder(
+                      itemCount: criticalProducts.length,
+                      itemBuilder: (context, index) {
+                        final product = criticalProducts[index];
+                        return ListTile(
+                          leading: const Icon(Icons.warning,
+                              color: Colors.redAccent),
+                          title: Text(product['product_name'] ??
+                              product['name'] ??
+                              'Bilinmeyen Ürün'),
+                          trailing: Text(
+                            'Kalan: ${product['stock']}',
+                            style: const TextStyle(
+                                color: Colors.redAccent,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16),
+                          ),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        );
+      },
     );
   }
 }

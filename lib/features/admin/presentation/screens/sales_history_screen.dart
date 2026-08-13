@@ -48,14 +48,13 @@ class SalesHistoryScreen extends ConsumerWidget {
               try {
                 saleDate = DateTime.parse(
                   sale['created_at'] ?? DateTime.now().toIso8601String(),
-                );
+                ).toLocal();
               } catch (_) {
                 saleDate = DateTime.now();
               }
 
               final formattedDate =
                   DateFormat('dd.MM.yyyy - HH:mm').format(saleDate);
-
               return Card(
                 margin: const EdgeInsets.only(bottom: 12),
                 child: ExpansionTile(
