@@ -11,7 +11,7 @@ dependencies:
   flutter_riverpod: ^2.5.1
   go_router: ^14.2.7
   supabase_flutter: ^2.5.3
-  mobile_scanner: ^5.2.3
+  mobile_scanner: ^7.4.0
   flutter_dotenv: ^5.1.0
   intl: ^0.20.1
   connectivity_plus: ^7.3.1
@@ -21,6 +21,7 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^4.0.0
+  flutter_launcher_icons: ^0.14.4
 
 flutter:
   uses-material-design: true
@@ -28,6 +29,6 @@ flutter:
     - .env
 
 flutter_launcher_icons:
-  image_path: "assets/icon/asil_logo.png"
+  image_path: "assets/asil_logo.png"
   android: true
   ios: true

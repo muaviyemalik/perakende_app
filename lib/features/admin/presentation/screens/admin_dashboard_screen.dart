@@ -305,9 +305,61 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
         Expanded(
           child: MobileScanner(
             controller: _cameraController,
+            errorBuilder: (context, error) {
+              final details = error.errorDetails;
+
+              debugPrint('📷 MOBILE SCANNER HATASI');
+              debugPrint('Kod: ${error.errorCode}');
+              debugPrint('Detay kodu: ${details?.code}');
+              debugPrint('Mesaj: ${details?.message}');
+              debugPrint('Detay: ${details?.details}');
+
+              return Center(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(
+                        Icons.error_outline,
+                        size: 60,
+                        color: Colors.red,
+                      ),
+                      const SizedBox(height: 16),
+                      const Text(
+                        'Kamera başlatılamadı',
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        'Hata kodu: ${error.errorCode}',
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Native kod: ${details?.code ?? "yok"}',
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Mesaj: ${details?.message ?? "yok"}',
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Detay: ${details?.details ?? "yok"}',
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
             onDetect: (capture) {
-              final List<Barcode> barcodes = capture.barcodes;
-              for (final barcode in barcodes) {
+              for (final barcode in capture.barcodes) {
                 if (barcode.rawValue != null && barcode.rawValue!.isNotEmpty) {
                   setState(() {
                     _scannedBarcode = barcode.rawValue!;
