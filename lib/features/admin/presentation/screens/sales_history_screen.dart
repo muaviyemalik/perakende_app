@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
+import 'package:supabase_flutter/supabase_flutter.dart';
+
+import '../../../../features/auth/domain/kullanici_data.dart';
 import '../../../../providers/sales_provider.dart';
 
 class SalesHistoryScreen extends ConsumerWidget {
@@ -10,6 +13,7 @@ class SalesHistoryScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final salesAsync = ref.watch(salesHistoryProvider);
+    final currentUser = Supabase.instance.client.auth.currentUser;
 
     return Scaffold(
       appBar: AppBar(
@@ -39,10 +43,11 @@ class SalesHistoryScreen extends ConsumerWidget {
               final totalAmount = (sale['total_amount'] is num)
                   ? (sale['total_amount'] as num).toDouble()
                   : 0.0;
-              final profile = sale['profiles'];
-              final sellerEmail = profile is Map
-                  ? (profile['email'] ?? 'Bilinmeyen satıcı')
-                  : 'Bilinmeyen satıcı';
+              final sellerEmail = satisciEtiketi(
+                Map<String, dynamic>.from(sale),
+                currentUserId: currentUser?.id,
+                currentUserEmail: currentUser?.email,
+              );
 
               DateTime saleDate;
               try {

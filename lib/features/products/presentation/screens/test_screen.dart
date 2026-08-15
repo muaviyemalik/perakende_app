@@ -2,12 +2,21 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/providers/supabase_provider.dart';
+import '../../../../core/providers/tenant_provider.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 
-// FutureProvider to fetch products from Supabase
+// Test amaçlı ürün listesi provider'ı — tenant-aware
+// GÜVENLİK: isletme_id auth oturumundan alınır, filtresiz sorgu yapılmaz.
 final productsProvider = FutureProvider<List<dynamic>>((ref) async {
   final supabase = ref.watch(supabaseClientProvider);
-  final response = await supabase.from('products').select('*');
+  final isletmeId = await ref.watch(currentIsletmeIdProvider.future);
+
+  if (isletmeId == null) return [];
+
+  final response = await supabase
+      .from('products')
+      .select('*')
+      .eq('isletme_id', isletmeId); // Tenant filtresi
   return response as List<dynamic>;
 });
 
@@ -25,8 +34,7 @@ class _TestScreenState extends ConsumerState<TestScreen> {
     setState(() => _isLoggingOut = true);
 
     try {
-      final supabase = ref.read(supabaseClientProvider);
-      await supabase.auth.signOut();
+      await performLogout(ref);
       // Router'ın redirect mantığı otomatik olarak /login'e yönlendirecek
     } catch (e) {
       if (mounted) {
@@ -48,7 +56,7 @@ class _TestScreenState extends ConsumerState<TestScreen> {
   Widget build(BuildContext context) {
     final productsAsync = ref.watch(productsProvider);
     final authState = ref.watch(authStateProvider);
-    final userRole = ref.watch(userRoleProvider);
+    final kullaniciAsync = ref.watch(kullaniciProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -104,16 +112,37 @@ class _TestScreenState extends ConsumerState<TestScreen> {
                         ),
                         const SizedBox(height: 8),
                         // Role Information
-                        userRole.when(
-                          data: (role) {
-                            final roleText =
-                                role == 'admin' ? 'Admin' : 'Çalışan';
+                        kullaniciAsync.when(
+                          data: (result) {
+                            final rol = result.data?.rol;
+                            final hata = result.hataMesaji;
+
+                            if (hata != null) {
+                              return Text(
+                                hata,
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  color: Colors.red,
+                                ),
+                              );
+                            }
+
+                            if (rol == null) {
+                              return const Text(
+                                'Rol bilgisi alınamadı',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: Colors.grey,
+                                ),
+                              );
+                            }
+
                             return Text(
-                              'Rol: $roleText',
+                              'Rol: ${rolGoruntule(rol)}',
                               style: TextStyle(
                                 fontSize: 14,
                                 fontWeight: FontWeight.bold,
-                                color: role == 'admin'
+                                color: rol == 'admin'
                                     ? Colors.red.shade700
                                     : Colors.green.shade700,
                               ),
@@ -123,7 +152,7 @@ class _TestScreenState extends ConsumerState<TestScreen> {
                             'Rol yükleniyor...',
                             style: TextStyle(fontSize: 14),
                           ),
-                          error: (error, stack) => const Text(
+                          error: (_, __) => const Text(
                             'Rol bilgisi alınamadı',
                             style: TextStyle(fontSize: 14, color: Colors.grey),
                           ),

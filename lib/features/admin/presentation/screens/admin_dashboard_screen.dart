@@ -7,6 +7,7 @@ import '../../../../core/providers/supabase_provider.dart';
 import '../../../../providers/cart_provider.dart';
 import '../../../../providers/dashboard_stats_provider.dart';
 import '../../../../providers/product_provider.dart';
+import '../../../auth/presentation/providers/auth_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class AdminDashboardScreen extends ConsumerStatefulWidget {
@@ -75,8 +76,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
     setState(() => _isLoggingOut = true);
 
     try {
-      final supabase = ref.read(supabaseClientProvider);
-      await supabase.auth.signOut();
+      await performLogout(ref);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -980,10 +980,9 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
-      builder: (context) {
+      builder: (sheetCtx) {
         return SizedBox(
-          height: MediaQuery.of(context).size.height *
-              0.7, // Ekranın %70'ini kaplar
+          height: MediaQuery.of(sheetCtx).size.height * 0.7,
           child: Column(
             children: [
               const Padding(
@@ -992,32 +991,38 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
                     style:
                         TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
               ),
+              // GÜVENLİK: allProductsProvider tenant-aware'dir.
+              // Supabase RLS + isletme_id filtresi ile yalnızca bu
+              // kullanıcının işletmesine ait ürünler listelenir.
               Expanded(
-                child: FutureBuilder(
-                  future: Supabase.instance.client
-                      .from('products')
-                      .select()
-                      .order('name'),
-                  builder: (context, snapshot) {
-                    if (snapshot.connectionState == ConnectionState.waiting) {
-                      return const Center(child: CircularProgressIndicator());
-                    }
-                    final products = snapshot.data as List<dynamic>? ?? [];
-                    if (products.isEmpty) {
-                      return const Center(
-                          child: Text('Sistemde ürün bulunmuyor.'));
-                    }
-                    return ListView.builder(
-                      itemCount: products.length,
-                      itemBuilder: (context, index) {
-                        final product = products[index];
-                        return ListTile(
-                          title: Text(product['product_name'] ??
-                              product['name'] ??
-                              'Bilinmeyen Ürün'),
-                          trailing: Text('Stok: ${product['stock']}',
-                              style: const TextStyle(
-                                  fontWeight: FontWeight.bold, fontSize: 16)),
+                child: Consumer(
+                  builder: (context, ref, _) {
+                    final productsAsync = ref.watch(allProductsProvider);
+                    return productsAsync.when(
+                      loading: () =>
+                          const Center(child: CircularProgressIndicator()),
+                      error: (e, _) => Center(
+                        child: Text('Ürünler yüklenemedi: $e'),
+                      ),
+                      data: (products) {
+                        if (products.isEmpty) {
+                          return const Center(
+                              child: Text('Sistemde ürün bulunmuyor.'));
+                        }
+                        return ListView.builder(
+                          itemCount: products.length,
+                          itemBuilder: (context, index) {
+                            final product = products[index];
+                            return ListTile(
+                              title: Text(product['product_name'] ??
+                                  product['name'] ??
+                                  'Bilinmeyen Ürün'),
+                              trailing: Text('Stok: ${product['stock']}',
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 16)),
+                            );
+                          },
                         );
                       },
                     );

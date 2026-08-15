@@ -1,14 +1,46 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../core/providers/tenant_provider.dart';
+import '../features/auth/domain/kullanici_data.dart';
+
+/// Dashboard istatistiklerini giriş yapan kullanıcının işletmesiyle filtreli getirir.
+///
+/// GÜVENLİK: isletme_id, auth oturumundan türetilen [currentIsletmeIdProvider]'dan
+/// alınır. LocalStorage'a güvenilmez. Asıl erişim kontrolü Supabase RLS tarafındadır.
 final dashboardStatsProvider =
     FutureProvider<Map<String, dynamic>>((ref) async {
   final supabase = Supabase.instance.client;
+  final currentUser = supabase.auth.currentUser;
 
-  final productsResponse =
-      await supabase.from('products').select('id, name, stock');
-  final salesResponse =
-      await supabase.from('sales').select('*, profiles!created_by(email)');
+  // İşletme ID'sini auth oturumundan türetilmiş provider'dan al
+  final isletmeId = await ref.watch(currentIsletmeIdProvider.future);
+
+  // Kullanıcının işletmesi yüklenmediyse boş veri döndür
+  if (isletmeId == null) {
+    return {
+      'totalProducts': 0,
+      'criticalStock': 0,
+      'criticalProductsList': <Map<String, dynamic>>[],
+      'dailyRevenue': 0.0,
+      'employeeSales': <Map<String, dynamic>>[],
+    };
+  }
+
+  // Yalnızca bu kullanıcının işletmesine ait ürünleri getir
+  // NOT: .eq('isletme_id', isletmeId) Flutter tarafı UX filtresidir.
+  //      Asıl güvenlik Supabase RLS tarafındadır (RLS olmadan bile
+  //      başka işletmenin verisi dönemez).
+  final productsResponse = await supabase
+      .from('products')
+      .select('id, name, stock')
+      .eq('isletme_id', isletmeId);
+
+  // Yalnızca bu kullanıcının işletmesine ait satışları getir
+  final salesResponse = await supabase
+      .from('sales')
+      .select('*')
+      .eq('isletme_id', isletmeId);
 
   final products = List<Map<String, dynamic>>.from(
     (productsResponse as List?)
@@ -60,13 +92,14 @@ final dashboardStatsProvider =
       }
     }
 
-    final profile = sale['profiles'];
-    final email = profile is Map
-        ? (profile['email'] ?? 'Bilinmeyen satıcı')
-        : 'Bilinmeyen satıcı';
+    final sellerLabel = satisciEtiketi(
+      sale,
+      currentUserId: currentUser?.id,
+      currentUserEmail: currentUser?.email,
+    );
 
-    employeeTotals[email.toString()] =
-        (employeeTotals[email.toString()] ?? 0.0) + totalAmount;
+    employeeTotals[sellerLabel] =
+        (employeeTotals[sellerLabel] ?? 0.0) + totalAmount;
   }
 
   final employeeSales = employeeTotals.entries

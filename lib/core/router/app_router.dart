@@ -1,67 +1,82 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../features/admin/presentation/screens/add_product_screen.dart';
 import '../../features/admin/presentation/screens/admin_dashboard_screen.dart';
 import '../../features/admin/presentation/screens/sales_history_screen.dart';
 import '../../features/auth/presentation/providers/auth_provider.dart';
 import '../../features/auth/presentation/screens/employee_dashboard_screen.dart';
+import '../../features/auth/presentation/screens/force_change_password_screen.dart';
 import '../../features/auth/presentation/screens/login_screen.dart';
 import '../../features/products/presentation/screens/test_screen.dart';
 
+String? _homeDestination(AsyncValue<String?> kullaniciRol) {
+  return kullaniciRol.maybeWhen(
+    data: (rol) => dashboardPathForRol(rol),
+    orElse: () => null,
+  );
+}
+
 final appRouterProvider = Provider<GoRouter>((ref) {
-  // Watch the auth state to enable redirect logic
-  final authState = ref.watch(authStateProvider);
-  final userRole = ref.watch(userRoleProvider);
+  ref.watch(authStateProvider);
+  final kullaniciRol = ref.watch(userRoleProvider);
+  final kullaniciAsync = ref.watch(kullaniciProvider);
 
   return GoRouter(
     initialLocation: '/',
     redirect: (context, state) {
-      // Check if user is authenticated
-      final isLoggedIn = authState.maybeWhen(
-        data: (session) => session != null,
-        orElse: () => false,
-      );
+      final location = state.matchedLocation;
+      final isLoggedIn =
+          Supabase.instance.client.auth.currentUser != null;
 
-      // If not logged in, redirect to login
       if (!isLoggedIn) {
-        if (state.matchedLocation != '/login') {
-          return '/login';
+        if (location == '/login') {
+          return null;
         }
+        return '/login';
+      }
+
+      if (kullaniciAsync.isLoading) {
         return null;
       }
 
-      // If logged in and on login page, redirect based on role
-      if (state.matchedLocation == '/login') {
-        return userRole.maybeWhen(
-          data: (role) {
-            if (role == 'admin') {
-              return '/admin-dashboard';
-            } else if (role == 'employee') {
-              return '/employee-dashboard';
-            }
-            return '/';
-          },
-          orElse: () => '/',
-        );
+      final kullaniciResult = kullaniciAsync.maybeWhen(
+        data: (result) => result,
+        orElse: () => null,
+      );
+
+      if (kullaniciResult?.kullaniciYuklenemedi ?? false) {
+        if (location == '/login') {
+          return null;
+        }
+        return '/login';
       }
 
-      // If on home page and logged in, redirect based on role
-      if (state.matchedLocation == '/') {
-        return userRole.maybeWhen(
-          data: (role) {
-            if (role == 'admin') {
-              return '/admin-dashboard';
-            } else if (role == 'employee') {
-              return '/employee-dashboard';
-            }
-            return '/';
-          },
-          orElse: () => '/',
-        );
+      final sifreDegistiMi = kullaniciResult?.data?.sifreDegistiMi;
+
+      if (sifreDegistiMi == null) {
+        return null;
       }
 
-      // No redirect needed
+      if (!sifreDegistiMi) {
+        if (location == '/force-change-password') {
+          return null;
+        }
+        return '/force-change-password';
+      }
+
+      if (location == '/login' || location == '/force-change-password') {
+        return _homeDestination(kullaniciRol) ?? '/';
+      }
+
+      if (location == '/') {
+        final dashboard = _homeDestination(kullaniciRol);
+        if (dashboard != null && dashboard != location) {
+          return dashboard;
+        }
+      }
+
       return null;
     },
     routes: [
@@ -75,6 +90,12 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: '/login',
         builder: (context, state) {
           return const LoginScreen();
+        },
+      ),
+      GoRoute(
+        path: '/force-change-password',
+        builder: (context, state) {
+          return const ForceChangePasswordScreen();
         },
       ),
       GoRoute(

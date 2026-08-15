@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../../../core/providers/supabase_provider.dart';
+import '../../../../core/providers/tenant_provider.dart';
 
 class AddProductScreen extends ConsumerStatefulWidget {
   const AddProductScreen({super.key});
@@ -81,11 +82,38 @@ class _AddProductScreenState extends ConsumerState<AddProductScreen> {
 
     try {
       final supabase = ref.read(supabaseClientProvider);
+
+      // GÜVENLİK: isletme_id'yi auth oturumundan türetilmiş tenant provider'dan al.
+      // LocalStorage'a güvenilmez — kullanıcı tarafından manipüle edilebilir.
+      // Supabase RLS + trigger isletme_id'yi sunucu tarafında doğrulayacak ve
+      // override edecek — bu Flutter tarafı filtresi yalnızca UX katmanıdır.
+      final isletmeId = await ref.read(currentIsletmeIdProvider.future);
+
+      if (isletmeId == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'İşletme bilgisi bulunamadı. Lütfen tekrar giriş yapın.',
+              ),
+              backgroundColor: Colors.red,
+              duration: Duration(seconds: 3),
+            ),
+          );
+        }
+        return;
+      }
+
+      // INSERT: Supabase TRIGGER, isletme_id'yi auth.uid() → kullanicilar.isletme_id
+      // üzerinden doğrulayarak override eder. Flutter'dan gönderilen isletme_id
+      // yanlış olsa bile trigger doğru değeri atar; RLS policy yanlış değerle
+      // gelen INSERT'i zaten reddeder.
       await supabase.from('products').insert({
         'name': _nameController.text.trim(),
         'price': double.parse(_priceController.text),
         'stock': int.parse(_stockController.text),
         'barcode': _barcodeController.text.trim(),
+        'isletme_id': isletmeId, // DB trigger override edecek (güvenlik katmanı)
       });
 
       if (mounted) {
@@ -96,7 +124,6 @@ class _AddProductScreenState extends ConsumerState<AddProductScreen> {
             duration: Duration(seconds: 2),
           ),
         );
-        // Sayfayı kapat ve dashboard'a dön
         context.pop();
       }
     } on Exception catch (e) {

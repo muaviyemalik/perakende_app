@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
-import '../../../../core/providers/supabase_provider.dart';
 import '../../../../providers/cart_provider.dart';
 import '../../../../providers/product_provider.dart';
 import '../providers/auth_provider.dart';
@@ -27,8 +26,7 @@ class _EmployeeDashboardScreenState
     setState(() => _isLoggingOut = true);
 
     try {
-      final supabase = ref.read(supabaseClientProvider);
-      await supabase.auth.signOut();
+      await performLogout(ref);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -507,9 +505,9 @@ class _EmployeeDashboardScreenState
                     ),
                     const SizedBox(height: 16),
                     userRole.when(
-                      data: (role) {
+                      data: (rol) {
                         return Text(
-                          'Rolü: ${role == 'employee' ? 'Çalışan' : role}',
+                          'Rolü: ${rol != null ? rolGoruntule(rol) : 'Bilinmiyor'}',
                           style: const TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.bold,

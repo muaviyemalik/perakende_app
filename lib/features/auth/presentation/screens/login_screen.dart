@@ -1,9 +1,16 @@
+import 'dart:developer' as developer;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../../core/providers/supabase_provider.dart';
+import '../../../../core/storage/local_storage_service.dart';
+import '../providers/auth_provider.dart';
+import '../../data/kullanici_servisi.dart';
+
+const _logTag = 'AUTH';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -31,6 +38,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     super.dispose();
   }
 
+  Future<void> _cleanupFailedSession() async {
+    await cleanupFailedAuthSession(ref);
+  }
+
   Future<void> _handleLogin() async {
     if (_emailController.text.isEmpty || _passwordController.text.isEmpty) {
       _showErrorSnackBar('Lütfen email ve şifre girin');
@@ -39,20 +50,83 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
     setState(() => _isLoading = true);
 
+    final supabase = ref.read(supabaseClientProvider);
+
     try {
-      final supabase = ref.read(supabaseClientProvider);
+      developer.log('Login başladı', name: _logTag);
+
       await supabase.auth.signInWithPassword(
         email: _emailController.text.trim(),
         password: _passwordController.text,
       );
 
-      if (mounted) {
-        // Başarılı giriş — router otomatik yönlendirecek
-        context.go('/');
+      developer.log('Auth başarılı', name: _logTag);
+
+      final authUser = supabase.auth.currentUser;
+      if (authUser == null) {
+        _showErrorSnackBar('Kullanıcı bilgisi alınamadı');
+        await _cleanupFailedSession();
+        return;
       }
+
+      developer.log('authUser.id = ${authUser.id}', name: _logTag);
+
+      final kullanici = await ref
+          .read(kullaniciServisiProvider)
+          .getKullaniciByAuthId(authUser.id);
+
+      developer.log(
+        'isletme_id = ${kullanici.isletmeId}, rol = ${kullanici.rol}, '
+        'sifre_degisti_mi = ${kullanici.sifreDegistiMi}',
+        name: _logTag,
+      );
+
+      await LocalStorageService.saveIsletmeId(kullanici.isletmeId);
+
+      ref.invalidate(kullaniciProvider);
+
+      if (!mounted) return;
+
+      final String hedef;
+      if (!kullanici.sifreDegistiMi) {
+        hedef = '/force-change-password';
+      } else {
+        hedef = dashboardPathForRol(kullanici.rol) ?? '/login';
+        if (hedef == '/login') {
+          _showErrorSnackBar(
+            'Rolünüz için tanımlı bir panel bulunamadı (${kullanici.rol}). '
+            'Lütfen yöneticinizle iletişime geçin.',
+          );
+          await _cleanupFailedSession();
+          return;
+        }
+      }
+
+      developer.log('yönlendirme = $hedef', name: _logTag);
+      context.go(hedef);
     } on AuthException catch (e) {
-      _showErrorSnackBar('Giriş hatası: ${e.message}');
+      developer.log('Auth hatası — ${e.message}', name: _logTag, level: 900);
+      final lowerMessage = e.message.toLowerCase();
+      if (lowerMessage.contains('invalid') ||
+          lowerMessage.contains('credentials') ||
+          lowerMessage.contains('email not confirmed')) {
+        _showErrorSnackBar('Email veya şifre hatalı.');
+      } else {
+        _showErrorSnackBar('Giriş hatası: ${e.message}');
+      }
+    } on KullaniciServisiException catch (e) {
+      developer.log(
+        'kullanici hatası — tip=${e.tip}, message=${e.message}',
+        name: _logTag,
+        level: 900,
+      );
+      if (shouldCleanupSessionOnKullaniciError(e.tip)) {
+        await _cleanupFailedSession();
+      }
+      _showErrorSnackBar(e.message);
     } catch (e) {
+      developer.log('beklenmeyen hata — $e', name: _logTag, level: 1000);
+      await _cleanupFailedSession();
       _showErrorSnackBar('Beklenmeyen hata: $e');
     } finally {
       if (mounted) {
@@ -86,7 +160,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 const SizedBox(height: 40),
-                // Title
                 const Text(
                   'Perakende Uygulaması',
                   style: TextStyle(
@@ -103,7 +176,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   ),
                 ),
                 const SizedBox(height: 40),
-                // Email TextField
                 TextField(
                   controller: _emailController,
                   keyboardType: TextInputType.emailAddress,
@@ -118,7 +190,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   ),
                 ),
                 const SizedBox(height: 16),
-                // Password TextField
                 TextField(
                   controller: _passwordController,
                   obscureText: true,
@@ -133,7 +204,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   ),
                 ),
                 const SizedBox(height: 24),
-                // Login Button
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
