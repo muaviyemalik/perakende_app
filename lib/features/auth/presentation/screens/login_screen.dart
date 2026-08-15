@@ -154,25 +154,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         : const Text('Giriş Yap'),
                   ),
                 ),
-                const SizedBox(height: 16),
-                // Register Link
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Text('Hesabın yok mu? '),
-                    GestureDetector(
-                      onTap:
-                          _isLoading ? null : () => context.push('/register'),
-                      child: Text(
-                        'Kayıt Ol',
-                        style: TextStyle(
-                          color: Colors.blue.shade700,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
               ],
             ),
           ),

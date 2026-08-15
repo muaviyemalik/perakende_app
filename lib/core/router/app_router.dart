@@ -7,7 +7,6 @@ import '../../features/admin/presentation/screens/sales_history_screen.dart';
 import '../../features/auth/presentation/providers/auth_provider.dart';
 import '../../features/auth/presentation/screens/employee_dashboard_screen.dart';
 import '../../features/auth/presentation/screens/login_screen.dart';
-import '../../features/auth/presentation/screens/register_screen.dart';
 import '../../features/products/presentation/screens/test_screen.dart';
 
 final appRouterProvider = Provider<GoRouter>((ref) {
@@ -26,16 +25,14 @@ final appRouterProvider = Provider<GoRouter>((ref) {
 
       // If not logged in, redirect to login
       if (!isLoggedIn) {
-        if (state.matchedLocation != '/login' &&
-            state.matchedLocation != '/register') {
+        if (state.matchedLocation != '/login') {
           return '/login';
         }
         return null;
       }
 
-      // If logged in and on login/register pages, redirect based on role
-      if (state.matchedLocation == '/login' ||
-          state.matchedLocation == '/register') {
+      // If logged in and on login page, redirect based on role
+      if (state.matchedLocation == '/login') {
         return userRole.maybeWhen(
           data: (role) {
             if (role == 'admin') {
@@ -78,12 +75,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: '/login',
         builder: (context, state) {
           return const LoginScreen();
-        },
-      ),
-      GoRoute(
-        path: '/register',
-        builder: (context, state) {
-          return const RegisterScreen();
         },
       ),
       GoRoute(
