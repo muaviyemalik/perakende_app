@@ -222,54 +222,17 @@ class CartNotifier extends Notifier<List<CartItem>> {
     for (String saleJson in offlineSales) {
       try {
         final saleData = jsonDecode(saleJson);
-        final userId = saleData['user_id'] as String?;
-        final totalAmount = saleData['total_amount'];
         final items = saleData['items'] as List<dynamic>;
-        final isletmeId = saleData['isletme_id'];
 
-        if (isletmeId == null || userId == null) {
-          failedSales.add(saleJson);
-          continue;
-        }
+        // Satışı RPC üzerinden atomik olarak gerçekleştir
+        final rpcItems = items.map((item) => {
+              'product_id': item['product_id'],
+              'quantity': item['quantity'],
+            }).toList();
 
-        // Satışı oluştur
-        // NOT: Sunucu tarafındaki trigger isletme_id ve created_by'ı override eder.
-        final saleResponse = await Supabase.instance.client
-            .from('sales')
-            .insert({
-              'total_amount': totalAmount,
-              'created_by': userId,
-              'isletme_id': isletmeId,
-            })
-            .select('id')
-            .single();
-
-        final saleId = saleResponse['id'];
-
-        // Satış kalemlerini ve stokları güncelle
-        for (var item in items) {
-          // sale_items INSERT: trigger isletme_id'yi sales tablosundan alır
-          await Supabase.instance.client.from('sale_items').insert({
-            'sale_id': saleId,
-            'product_id': item['product_id'],
-            'quantity': item['quantity'],
-            'unit_price': item['unit_price'],
-            'isletme_id': isletmeId, // Trigger override edecek (güvenlik katmanı DB'de)
-          });
-
-          // Stok güncelleme: RLS, kendi işletmesi dışındaki ürünleri engeller
-          final productData = await Supabase.instance.client
-              .from('products')
-              .select('stock')
-              .eq('id', item['product_id'])
-              .single();
-
-          int currentStock = productData['stock'];
-          await Supabase.instance.client
-              .from('products')
-              .update({'stock': currentStock - (item['quantity'] as int)}).eq(
-                  'id', item['product_id']);
-        }
+        await Supabase.instance.client.rpc('complete_sale', params: {
+          'p_items': rpcItems,
+        });
       } catch (e) {
         failedSales.add(saleJson);
       }
