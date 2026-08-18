@@ -283,9 +283,10 @@ class CartNotifier extends Notifier<List<CartItem>> {
   // ANA SATIŞ METODU
   // ---------------------------------------------------------------------------
   // GÜVENLİK NOTU:
-  //   isletme_id, auth oturumundan türetilmiş kullaniciProvider üzerinden alınır.
-  //   LocalStorage'a güvenilmez — sadece performans için tutulur.
-  //   Supabase RLS + trigger her INSERT'te sunucu tarafında doğrulama yapar.
+  //   Online satış complete_sale RPC üzerinden atomik olarak gerçekleşir.
+  //   isletme_id, created_by, unit_price ve total_amount DB tarafında belirlenir.
+  //   Client manipülasyonu imkânsız kılınmıştır.
+  //   Offline satış P1'de ayrıca ele alınacak.
   Future<String?> completeSale() async {
     if (state.isEmpty) return 'Sepet boş!';
 
@@ -316,73 +317,61 @@ class CartNotifier extends Notifier<List<CartItem>> {
     await syncOfflineSales();
 
     try {
-      // İşletme ID'sini Supabase'den doğrudan oku (auth → kullanicilar tablosu)
-      // Bu sorgu RLS korumalıdır — sadece kendi kaydı döner.
-      final kullaniciRow = await client
-          .from('kullanicilar')
-          .select('isletme_id')
-          .eq('id', userId)
-          .single();
+      // -----------------------------------------------------------------------
+      // P0.2: Tek atomik RPC çağrısı — complete_sale
+      //
+      // GÜVENLİK:
+      //   • isletme_id ve created_by DB tarafında auth.uid() ile belirlenir.
+      //   • unit_price her zaman products.price'tan alınır (client fiyatına güvenilmez).
+      //   • total_amount DB hesaplar (client manipülasyonuna kapalı).
+      //   • Stok kontrolü, sales/sale_items INSERT ve stok güncelleme tek
+      //     transaction içinde gerçekleşir — kısmen başarı imkânsız.
+      //   • FOR UPDATE ORDER BY id kilidi ile race condition koruması sağlanır.
+      //
+      // PARAMETRELER:
+      //   p_items: [{product_id: uuid, quantity: int}] — sadece ürün kimliği ve adet.
+      //   Fiyat, tenant, kullanıcı bilgileri sunucudan alınır.
+      // -----------------------------------------------------------------------
+      final items = state
+          .map((item) => {
+                'product_id': item.product_id,
+                'quantity': item.quantity,
+              })
+          .toList();
 
-      final isletmeId = kullaniciRow['isletme_id'] as int?;
-      if (isletmeId == null) {
-        return 'İşletme bilgisi bulunamadı. Lütfen tekrar giriş yapın.';
-      }
-
-      // Stok kontrolü — RLS kendi işletmesi dışındaki ürünleri zaten engelliyor
-      for (var item in state) {
-        final productData = await client
-            .from('products')
-            .select('stock')
-            .eq('id', item.product_id)
-            .single();
-
-        int currentStock = productData['stock'];
-        if (item.quantity > currentStock) {
-          return 'Yetersiz stok: ${item.name} (Kalan: $currentStock)';
-        }
-      }
-
-      // Satışı oluştur
-      // NOT: Sunucu TRIGGER isletme_id'yi ve created_by'ı override eder.
-      final saleResponse = await client
-          .from('sales')
-          .insert({
-            'total_amount': totalAmount,
-            'created_by': userId, // Trigger override edecek
-            'isletme_id': isletmeId, // Trigger override edecek
-          })
-          .select('id')
-          .single();
-
-      final saleId = saleResponse['id'];
-
-      // Satış kalemlerini ekle ve stokları düş
-      for (var item in state) {
-        // sale_items INSERT: trigger isletme_id'yi sales tablosundan çeker
-        await client.from('sale_items').insert({
-          'sale_id': saleId,
-          'product_id': item.product_id,
-          'quantity': item.quantity,
-          'unit_price': item.price,
-          'isletme_id': isletmeId, // Trigger override edecek (DB güvenliği)
-        });
-
-        final productData = await client
-            .from('products')
-            .select('stock')
-            .eq('id', item.product_id)
-            .single();
-
-        int currentStock = productData['stock'];
-        await client
-            .from('products')
-            .update({'stock': currentStock - item.quantity}).eq(
-                'id', item.product_id);
-      }
+      await client.rpc('complete_sale', params: {'p_items': items});
 
       clearCart();
       return null; // Başarılı
+    } on PostgrestException catch (e) {
+      // DB fonksiyonu SATIS_HATA:* prefix'li mesajlar fırlatır
+      final msg = e.message;
+      if (msg.contains('SATIS_HATA:YETERSIZ_STOK')) {
+        // DETAIL alanından ürün adını çıkar
+        final detail = e.details?.toString() ?? '';
+        final urunMatch = RegExp(r'urun=([^,]+)').firstMatch(detail);
+        final mevcutMatch = RegExp(r'mevcut=(\d+)').firstMatch(detail);
+        final urunAdi = urunMatch?.group(1) ?? 'Ürün';
+        final mevcut = mevcutMatch?.group(1) ?? '0';
+        return 'Yetersiz stok: $urunAdi (Kalan: $mevcut)';
+      }
+      if (msg.contains('SATIS_HATA:SEPET_BOS')) {
+        return 'Sepet boş!';
+      }
+      if (msg.contains('SATIS_HATA:GECERSIZ_MIKTAR')) {
+        return 'Geçersiz miktar — adet 0 veya negatif olamaz.';
+      }
+      if (msg.contains('SATIS_HATA:TEKRAR_URUN_ID')) {
+        return 'Sepette tekrar eden ürün var. Lütfen sepeti kontrol edin.';
+      }
+      if (msg.contains('SATIS_HATA:GECERSIZ_URUN')) {
+        return 'Geçersiz ürün — bu işletmeye ait olmayan ürün seçildi.';
+      }
+      if (msg.contains('SATIS_HATA:ISLETME_BULUNAMADI') ||
+          msg.contains('SATIS_HATA:KIMLIK_DOGRULANAMADI')) {
+        return 'Oturum bilgisi geçersiz. Lütfen tekrar giriş yapın.';
+      }
+      return 'Satış sırasında hata oluştu: ${e.message}';
     } catch (e) {
       return 'Satış sırasında hata oluştu: $e';
     }
