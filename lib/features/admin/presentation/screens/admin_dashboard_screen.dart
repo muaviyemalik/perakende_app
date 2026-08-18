@@ -1014,9 +1014,8 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
                           itemBuilder: (context, index) {
                             final product = products[index];
                             return ListTile(
-                              title: Text(product['product_name'] ??
-                                  product['name'] ??
-                                  'Bilinmeyen Ürün'),
+                              title: Text(
+                                  product['name'] ?? 'Bilinmeyen Ürün'),
                               trailing: Text('Stok: ${product['stock']}',
                                   style: const TextStyle(
                                       fontWeight: FontWeight.bold,
@@ -1065,9 +1064,8 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
                         return ListTile(
                           leading: const Icon(Icons.warning,
                               color: Colors.redAccent),
-                          title: Text(product['product_name'] ??
-                              product['name'] ??
-                              'Bilinmeyen Ürün'),
+                          title: Text(
+                              product['name'] ?? 'Bilinmeyen Ürün'),
                           trailing: Text(
                             'Kalan: ${product['stock']}',
                             style: const TextStyle(
