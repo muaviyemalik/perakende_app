@@ -23,6 +23,8 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
   bool _isLoggingOut = false;
   bool _isCompletingSale = false;
   String _scannedBarcode = '';
+  String _searchQuery = '';
+  final TextEditingController _searchController = TextEditingController();
   RealtimeChannel? _dashboardChannel;
   final MobileScannerController _cameraController = MobileScannerController();
 
@@ -69,6 +71,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
   void dispose() {
     _dashboardChannel?.unsubscribe();
     _cameraController.dispose();
+    _searchController.dispose();
     super.dispose();
   }
 
@@ -801,58 +804,252 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
     );
   }
 
-  Widget _buildManagementTab() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            ElevatedButton.icon(
-              onPressed: () {
-                context.push('/add-product');
-              },
-              icon: const Icon(Icons.add_circle_outline, size: 28),
-              label: const Text(
-                'Yeni Ürün Ekle',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+  Widget _buildProductsTab() {
+    final productsAsync = ref.watch(allProductsProvider);
+
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Row(
+            children: [
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: () {
+                    context.push('/add-product');
+                  },
+                  icon: const Icon(Icons.add_circle_outline),
+                  label: const Text('Yeni Ürün', style: TextStyle(fontWeight: FontWeight.bold)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                  ),
+                ),
               ),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.green,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 32,
-                  vertical: 20,
+              const SizedBox(width: 8),
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: () {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Stok Güncelle sayfası yakında'),
+                        duration: Duration(seconds: 2),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.edit),
+                  label: const Text('Stok Güncelle', style: TextStyle(fontWeight: FontWeight.bold)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16.0),
+          child: TextField(
+            controller: _searchController,
+            decoration: InputDecoration(
+              hintText: 'Ürün adı veya barkod ile ara...',
+              prefixIcon: const Icon(Icons.search),
+              suffixIcon: _searchQuery.isNotEmpty
+                  ? IconButton(
+                      icon: const Icon(Icons.clear),
+                      onPressed: () {
+                        _searchController.clear();
+                        setState(() {
+                          _searchQuery = '';
+                        });
+                      },
+                    )
+                  : null,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              filled: true,
+              fillColor: Colors.grey.shade50,
+            ),
+            onChanged: (value) {
+              setState(() {
+                _searchQuery = value.toLowerCase();
+              });
+            },
+          ),
+        ),
+        const SizedBox(height: 8),
+        Expanded(
+          child: productsAsync.when(
+            loading: () => const Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircularProgressIndicator(),
+                  SizedBox(height: 16),
+                  Text('Ürünler yükleniyor...'),
+                ],
+              ),
+            ),
+            error: (error, stack) => Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24.0),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.cloud_off, size: 64, color: Colors.grey),
+                    const SizedBox(height: 16),
+                    const Text(
+                      'Ürünler alınamadı',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'İnternet bağlantınızı kontrol edin. (Hata: $error)',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: Colors.grey),
+                    ),
+                    const SizedBox(height: 24),
+                    ElevatedButton.icon(
+                      onPressed: () => ref.refresh(allProductsProvider),
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('Tekrar Dene'),
+                    ),
+                  ],
                 ),
               ),
             ),
-            const SizedBox(height: 24),
-            ElevatedButton.icon(
-              onPressed: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Stok Güncelle sayfası yakında'),
-                    duration: Duration(seconds: 2),
+            data: (products) {
+              if (products.isEmpty) {
+                return const Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.inventory_2_outlined,
+                          size: 64, color: Colors.grey),
+                      SizedBox(height: 16),
+                      Text(
+                        'İşletmenize ait ürün bulunamadı.',
+                        style: TextStyle(
+                            fontSize: 18, fontWeight: FontWeight.w500),
+                      ),
+                    ],
                   ),
                 );
-              },
-              icon: const Icon(Icons.edit, size: 28),
-              label: const Text(
-                'Stok Güncelle',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-              ),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.blue,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 32,
-                  vertical: 20,
+              }
+
+              final filteredProducts = products.where((p) {
+                final name = (p['name'] ?? '').toString().toLowerCase();
+                final barcode = (p['barcode'] ?? '').toString().toLowerCase();
+                return name.contains(_searchQuery) ||
+                    barcode.contains(_searchQuery);
+              }).toList();
+
+              if (filteredProducts.isEmpty) {
+                return Center(
+                  child: Text(
+                    'Aramanızla eşleşen ürün bulunamadı: "$_searchQuery"',
+                    style: const TextStyle(color: Colors.grey, fontSize: 16),
+                  ),
+                );
+              }
+
+              return RefreshIndicator(
+                onRefresh: () async {
+                  return ref.refresh(allProductsProvider);
+                },
+                child: ListView.separated(
+                  padding: const EdgeInsets.only(bottom: 80),
+                  itemCount: filteredProducts.length,
+                  separatorBuilder: (context, index) => const Divider(height: 1),
+                  itemBuilder: (context, index) {
+                    final product = filteredProducts[index];
+                    final name = product['name'] ?? 'Bilinmeyen Ürün';
+                    final barcode = product['barcode'] ?? '-';
+                    final rawPrice = product['price'];
+                    final price = rawPrice is num ? rawPrice.toDouble() : 0.0;
+                    final stock = product['stock'] ?? 0;
+                    final productId = (product['id'] ?? '').toString();
+
+                    final isCriticalStock = stock <= 5;
+
+                    return ListTile(
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 8,
+                      ),
+                      leading: CircleAvatar(
+                        backgroundColor: Colors.blue.shade100,
+                        child: const Icon(Icons.inventory_2, color: Colors.blue),
+                      ),
+                      title: Text(
+                        name,
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      subtitle: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const SizedBox(height: 4),
+                          Text('Barkod: $barcode'),
+                          const SizedBox(height: 2),
+                          Row(
+                            children: [
+                              Text(
+                                'Stok: $stock',
+                                style: TextStyle(
+                                  color: isCriticalStock
+                                      ? Colors.red.shade700
+                                      : Colors.green.shade700,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              if (isCriticalStock) ...[
+                                const SizedBox(width: 4),
+                                Icon(Icons.warning,
+                                    size: 16, color: Colors.red.shade700),
+                              ],
+                            ],
+                          ),
+                        ],
+                      ),
+                      trailing: Text(
+                        '₺${price.toStringAsFixed(2)}',
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.blue,
+                        ),
+                      ),
+                      onTap: () {
+                        ref.read(cartProvider.notifier).addToCart(
+                              productId: productId,
+                              name: name,
+                              price: price,
+                            );
+                        ScaffoldMessenger.of(context).clearSnackBars();
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('$name sepete eklendi!'),
+                            backgroundColor: Colors.green,
+                            duration: const Duration(seconds: 1),
+                            behavior: SnackBarBehavior.floating,
+                          ),
+                        );
+                      },
+                    );
+                  },
                 ),
-              ),
-            ),
-          ],
+              );
+            },
+          ),
         ),
-      ),
+      ],
     );
   }
 
@@ -917,7 +1114,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
     final List<Widget> pages = [
       _buildScannerTab(),
       _buildSummaryTab(),
-      _buildManagementTab(),
+      _buildProductsTab(),
       _buildProfileTab(),
     ];
 
@@ -962,8 +1159,8 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
             label: 'Özet',
           ),
           BottomNavigationBarItem(
-            icon: Icon(Icons.settings),
-            label: 'Yönetim',
+            icon: Icon(Icons.shopping_bag),
+            label: 'Ürünler',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.person),

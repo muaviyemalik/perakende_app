@@ -20,6 +20,8 @@ class _EmployeeDashboardScreenState
   bool _isLoggingOut = false;
   bool _isCompletingSale = false;
   String _scannedBarcode = '';
+  String _searchQuery = '';
+  final TextEditingController _searchController = TextEditingController();
   final MobileScannerController _cameraController = MobileScannerController();
 
   Future<void> _handleLogout() async {
@@ -248,6 +250,7 @@ class _EmployeeDashboardScreenState
   @override
   void dispose() {
     _cameraController.dispose();
+    _searchController.dispose();
     super.dispose();
   }
 
@@ -474,11 +477,209 @@ class _EmployeeDashboardScreenState
   }
 
   Widget _buildProductsTab() {
-    return const Center(
-      child: Text(
-        'Ürün Listesi',
-        style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-      ),
+    final productsAsync = ref.watch(allProductsProvider);
+
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: TextField(
+            controller: _searchController,
+            decoration: InputDecoration(
+              hintText: 'Ürün adı veya barkod ile ara...',
+              prefixIcon: const Icon(Icons.search),
+              suffixIcon: _searchQuery.isNotEmpty
+                  ? IconButton(
+                      icon: const Icon(Icons.clear),
+                      onPressed: () {
+                        _searchController.clear();
+                        setState(() {
+                          _searchQuery = '';
+                        });
+                      },
+                    )
+                  : null,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              filled: true,
+              fillColor: Colors.grey.shade50,
+            ),
+            onChanged: (value) {
+              setState(() {
+                _searchQuery = value.toLowerCase();
+              });
+            },
+          ),
+        ),
+        Expanded(
+          child: productsAsync.when(
+            loading: () => const Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircularProgressIndicator(),
+                  SizedBox(height: 16),
+                  Text('Ürünler yükleniyor...'),
+                ],
+              ),
+            ),
+            error: (error, stack) => Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24.0),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.cloud_off, size: 64, color: Colors.grey),
+                    const SizedBox(height: 16),
+                    const Text(
+                      'Ürünler alınamadı',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'İnternet bağlantınızı kontrol edin. (Hata: $error)',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: Colors.grey),
+                    ),
+                    const SizedBox(height: 24),
+                    ElevatedButton.icon(
+                      onPressed: () => ref.refresh(allProductsProvider),
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('Tekrar Dene'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            data: (products) {
+              if (products.isEmpty) {
+                return const Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.inventory_2_outlined,
+                          size: 64, color: Colors.grey),
+                      SizedBox(height: 16),
+                      Text(
+                        'İşletmenize ait ürün bulunamadı.',
+                        style: TextStyle(
+                            fontSize: 18, fontWeight: FontWeight.w500),
+                      ),
+                    ],
+                  ),
+                );
+              }
+
+              final filteredProducts = products.where((p) {
+                final name = (p['name'] ?? '').toString().toLowerCase();
+                final barcode = (p['barcode'] ?? '').toString().toLowerCase();
+                return name.contains(_searchQuery) ||
+                    barcode.contains(_searchQuery);
+              }).toList();
+
+              if (filteredProducts.isEmpty) {
+                return Center(
+                  child: Text(
+                    'Aramanızla eşleşen ürün bulunamadı: "$_searchQuery"',
+                    style: const TextStyle(color: Colors.grey, fontSize: 16),
+                  ),
+                );
+              }
+
+              return RefreshIndicator(
+                onRefresh: () async {
+                  return ref.refresh(allProductsProvider);
+                },
+                child: ListView.separated(
+                  padding: const EdgeInsets.only(bottom: 80), // Fab icin bosluk
+                  itemCount: filteredProducts.length,
+                  separatorBuilder: (context, index) => const Divider(height: 1),
+                  itemBuilder: (context, index) {
+                    final product = filteredProducts[index];
+                    final name = product['name'] ?? 'Bilinmeyen Ürün';
+                    final barcode = product['barcode'] ?? '-';
+                    final rawPrice = product['price'];
+                    final price = rawPrice is num ? rawPrice.toDouble() : 0.0;
+                    final stock = product['stock'] ?? 0;
+                    final productId = (product['id'] ?? '').toString();
+
+                    final isCriticalStock = stock <= 5;
+
+                    return ListTile(
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 8,
+                      ),
+                      leading: CircleAvatar(
+                        backgroundColor: Colors.blue.shade100,
+                        child: const Icon(Icons.inventory_2, color: Colors.blue),
+                      ),
+                      title: Text(
+                        name,
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      subtitle: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const SizedBox(height: 4),
+                          Text('Barkod: $barcode'),
+                          const SizedBox(height: 2),
+                          Row(
+                            children: [
+                              Text(
+                                'Stok: $stock',
+                                style: TextStyle(
+                                  color: isCriticalStock
+                                      ? Colors.red.shade700
+                                      : Colors.green.shade700,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              if (isCriticalStock) ...[
+                                const SizedBox(width: 4),
+                                Icon(Icons.warning,
+                                    size: 16, color: Colors.red.shade700),
+                              ],
+                            ],
+                          ),
+                        ],
+                      ),
+                      trailing: Text(
+                        '₺${price.toStringAsFixed(2)}',
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.blue,
+                        ),
+                      ),
+                      onTap: () {
+                        ref.read(cartProvider.notifier).addToCart(
+                              productId: productId,
+                              name: name,
+                              price: price,
+                            );
+                        ScaffoldMessenger.of(context).clearSnackBars();
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('$name sepete eklendi!'),
+                            backgroundColor: Colors.green,
+                            duration: const Duration(seconds: 1),
+                            behavior: SnackBarBehavior.floating,
+                          ),
+                        );
+                      },
+                    );
+                  },
+                ),
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 
