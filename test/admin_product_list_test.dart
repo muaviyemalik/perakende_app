@@ -77,7 +77,6 @@ void main() {
     
     // Yönetim butonları yerinde durmalı
     expect(find.text('Yeni Ürün'), findsOneWidget);
-    expect(find.text('Stok Güncelle'), findsOneWidget);
   });
 
   testWidgets('Admin - Arama işlemi doğru çalışır (İsim veya barkod)',
