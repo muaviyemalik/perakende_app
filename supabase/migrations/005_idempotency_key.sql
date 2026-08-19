@@ -1,40 +1,67 @@
 -- =============================================================================
--- 003_complete_sale_rpc.sql
--- Atomik Satis Islemi -- complete_sale RPC fonksiyonu
+-- 005_idempotency_key.sql
+-- Satış idempotency desteği — tekrar gönderim koruması
 --
--- AMAC:
---   Flutter client'in ayri ayri yaptigi sales INSERT, sale_items INSERT,
---   products stok UPDATE islemlerini tek bir guvenli PostgreSQL transaction'a tasir.
+-- AMAÇ:
+--   Çevrimdışı satışlar internet geldiğinde senkronize edilirken aynı satışın
+--   iki kez kaydedilmesini önlemek. Flutter tarafı her satışa UUID v4 ile
+--   benzersiz bir idempotency_key atar, DB bunu UNIQUE constraint ile korur.
 --
--- GUVENLIK:
---   * SECURITY DEFINER + SET search_path = '' (SQL injection korumasi)
---   * isletme_id ve created_by ASLA client'tan alinmaz; auth.uid() uzerinden belirlenir
---   * unit_price ASLA client'tan alinmaz; products.price uzerinden belirlenir
---   * total_amount ASLA client'tan alinmaz; DB hesaplar
---   * Cross-tenant erisim: WHERE isletme_id = v_isletme_id ile engellenir
---   * EXECUTE yetkisi yalnizca authenticated role'e verilir
+-- GÜVENLİK:
+--   • idempotency_key nullable — mevcut satışlar etkilenmez (geriye uyumlu)
+--   • Partial UNIQUE INDEX (WHERE idempotency_key IS NOT NULL) — NULL değerler
+--     birden fazla olabilir, sadece gerçek key'ler unique zorunluluğuna tabi
+--   • complete_sale RPC'de duplicate key tespit edildiğinde stok/fiyat işlemi
+--     tekrarlanmaz, mevcut satış bilgisi döndürülür
 --
--- RACE CONDITION COZUMU:
---   SELECT ... FOR UPDATE ORDER BY id: tum urun satirlarini kilitler.
---   Stok=1 iken eszamanli iki satis gelirse:
---     - Ilki kilitleri alir, stok kontrolunu gecer, tamamlar
---     - Ikincisi bekler, kilit alinca stok=0 gorur, YETERSIZ_STOK hatasiyla rollback
---
--- MEVCUT TRIGGER UYUMLULUGU:
---   * trg_set_sale_tenant_and_creator: auth.uid() gecerlidir, ayni degeri yazar (zararsiz)
---   * trg_set_sale_item_isletme_id: sales tablosundan isletme_id okur (zararsiz)
---   * trg_set_product_isletme_id: sadece INSERT'te calisir, UPDATE'i etkilemez
---
--- IDEMPOTENT: CREATE OR REPLACE FUNCTION, DROP TYPE IF EXISTS ... CASCADE
+-- ÇALIŞTIRMA:
+--   Supabase Dashboard > SQL Editor'de bu dosyanın tamamını çalıştırın.
+--   Proje ID: vnvifxvtutlbivsegjtp
 -- =============================================================================
 
 
 -- =============================================================================
--- 1. complete_sale FONKSIYONU
+-- 1. SALES TABLOSUNA IDEMPOTENCY_KEY KOLONU
+-- =============================================================================
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name   = 'sales'
+          AND column_name  = 'idempotency_key'
+    ) THEN
+        ALTER TABLE public.sales
+            ADD COLUMN idempotency_key text;
+    END IF;
+END $$;
+
+
+-- =============================================================================
+-- 2. PARTIAL UNIQUE INDEX
+-- =============================================================================
+-- Yalnızca idempotency_key IS NOT NULL olan satırlar için unique zorunluluğu.
+-- Mevcut (NULL) satışlar etkilenmez.
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_idempotency_key_unique
+    ON public.sales (idempotency_key)
+    WHERE idempotency_key IS NOT NULL;
+
+
+-- =============================================================================
+-- 3. COMPLETE_SALE RPC GÜNCELLEMESİ
+-- =============================================================================
+-- Yeni parametre: p_idempotency_key text DEFAULT NULL
+-- Akış:
+--   1. p_idempotency_key verilmişse → sales tablosunda ara
+--   2. Bulunduysa → mevcut satışı döndür (idempotent, stok işlemi yok)
+--   3. Bulunamadıysa → normal satış akışı + idempotency_key kaydı
 -- =============================================================================
 
 CREATE OR REPLACE FUNCTION public.complete_sale(
-  p_items jsonb
+  p_items jsonb,
+  p_idempotency_key text DEFAULT NULL
 )
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -52,7 +79,32 @@ DECLARE
   v_product_rec     record;
   v_total_amount    numeric(12, 2) := 0;
   v_sale_id         uuid;
+  v_existing_sale   record;
 BEGIN
+
+  -- =========================================================================
+  -- ADIM 0: Idempotency kontrolü
+  -- =========================================================================
+  -- p_idempotency_key verilmişse ve daha önce işlendiyse:
+  --   stok/fiyat/insert işlemleri TEKRARLANMAZ, mevcut sonuç döndürülür.
+  -- Bu adım tüm diğer adımlardan önce çalışır — gereksiz kilit/sorgu engellenir.
+  -- =========================================================================
+  IF p_idempotency_key IS NOT NULL THEN
+    SELECT id, total_amount, isletme_id
+      INTO v_existing_sale
+      FROM public.sales
+     WHERE idempotency_key = p_idempotency_key;
+
+    IF v_existing_sale.id IS NOT NULL THEN
+      -- Zaten işlenmiş — idempotent yanıt
+      RETURN jsonb_build_object(
+        'sale_id',      v_existing_sale.id,
+        'total_amount', v_existing_sale.total_amount,
+        'isletme_id',   v_existing_sale.isletme_id,
+        'idempotent',   true
+      );
+    END IF;
+  END IF;
 
   -- =========================================================================
   -- ADIM 1: Kimlik dogrulama
@@ -214,10 +266,11 @@ BEGIN
   -- ADIM 7: Sales kaydi olustur
   --
   -- isletme_id ve created_by burada set edilir.
+  -- idempotency_key varsa kaydedilir (tekrar gönderim koruması).
   -- trg_set_sale_tenant_and_creator trigger'i ayni degerleri override eder (zararsiz).
   -- =========================================================================
-  INSERT INTO public.sales (total_amount, isletme_id, created_by)
-  VALUES (v_total_amount, v_isletme_id, v_user_id)
+  INSERT INTO public.sales (total_amount, isletme_id, created_by, idempotency_key)
+  VALUES (v_total_amount, v_isletme_id, v_user_id, p_idempotency_key)
   RETURNING id INTO v_sale_id;
 
   -- =========================================================================
@@ -276,13 +329,13 @@ $$;
 
 
 -- =============================================================================
--- 3. YETKI YONETIMI
+-- 4. YETKI YONETIMI
 -- =============================================================================
 
 -- Herkese acik erisimi kapat
-REVOKE ALL ON FUNCTION public.complete_sale(jsonb) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.complete_sale(jsonb, text) FROM PUBLIC;
 
 -- Yalnizca authenticate olmus kullanicilar cagirabillir
-GRANT EXECUTE ON FUNCTION public.complete_sale(jsonb) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.complete_sale(jsonb, text) TO authenticated;
 
 -- service_role: Supabase default olarak tum fonksiyonlara erisir

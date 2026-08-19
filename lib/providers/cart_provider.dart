@@ -1,12 +1,12 @@
+import 'dart:convert';
+
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import '../core/storage/local_storage_service.dart';
+import '../core/services/offline_sale_queue.dart';
 import 'dashboard_stats_provider.dart';
-
-import 'dart:convert';
-import 'package:connectivity_plus/connectivity_plus.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 // =============================================================================
 // ÜRÜNLERİ YEREL HAFIZAYA KAYDET (İnternet Varken Arka Planda Çalışır)
@@ -95,6 +95,8 @@ class CartItem {
 // CartNotifier
 // =============================================================================
 class CartNotifier extends Notifier<List<CartItem>> {
+  final _queue = OfflineSaleQueue.instance;
+
   @override
   List<CartItem> build() {
     // Otomatik internet dinleyicisi — bağlantı gelince çevrimdışı satışları senkronize et
@@ -104,8 +106,10 @@ class CartNotifier extends Notifier<List<CartItem>> {
       bool hasInternet = !results.contains(ConnectivityResult.none);
 
       if (hasInternet) {
-        await syncOfflineSales();
-        ref.invalidate(dashboardStatsProvider);
+        final synced = await _queue.syncAll();
+        if (synced > 0) {
+          ref.invalidate(dashboardStatsProvider);
+        }
       }
     });
 
@@ -170,86 +174,20 @@ class CartNotifier extends Notifier<List<CartItem>> {
   }
 
   // ---------------------------------------------------------------------------
-  // ÇEVRİMDIŞI SATIŞ KAYDETME
-  // ---------------------------------------------------------------------------
-  // GÜVENLİK NOTU:
-  //   isletmeId burada parametre olarak alınır. Bu değer çağıran tarafından
-  //   auth oturumundan türetilmiş olmalıdır (LocalStorage'dan değil).
-  //   Supabase'e gönderildiğinde RLS ve trigger, isletme_id'yi sunucu
-  //   tarafında doğrulayacak ve override edecektir.
-  Future<void> _saveSaleToLocal(
-      String userId, int isletmeId, double total, List<CartItem> items) async {
-    final prefs = await SharedPreferences.getInstance();
-
-    final saleData = {
-      'user_id': userId,
-      'isletme_id': isletmeId, // Auth oturumundan gelen değer
-      'total_amount': total,
-      'items': items
-          .map((e) => {
-                'product_id': e.product_id,
-                'quantity': e.quantity,
-                'unit_price': e.price,
-              })
-          .toList(),
-      'created_at': DateTime.now().toIso8601String(),
-    };
-
-    List<String> offlineSales = prefs.getStringList('offline_sales') ?? [];
-    offlineSales.add(jsonEncode(saleData));
-    await prefs.setStringList('offline_sales', offlineSales);
-  }
-
-  // ---------------------------------------------------------------------------
-  // İNTERNET GELDİĞİNDE BEKLEYEN SATIŞLARI SUPABASE'E GÖNDER
-  // ---------------------------------------------------------------------------
-  // GÜVENLİK NOTU:
-  //   Çevrimdışı kayıtlardaki isletme_id değeri referans olarak kullanılır
-  //   ancak Supabase sunucusundaki TRIGGER bu değeri her durumda
-  //   kullanıcının gerçek işletmesiyle override eder.
-  //   Yani manipüle edilmiş bir offline kayıt gönderse bile RLS reddeder.
-  Future<void> syncOfflineSales() async {
-    final prefs = await SharedPreferences.getInstance();
-    List<String> offlineSales = prefs.getStringList('offline_sales') ?? [];
-
-    if (offlineSales.isEmpty) return;
-
-    final connectivityResult = await Connectivity().checkConnectivity();
-    if (connectivityResult.contains(ConnectivityResult.none)) return;
-
-    List<String> failedSales = [];
-
-    for (String saleJson in offlineSales) {
-      try {
-        final saleData = jsonDecode(saleJson);
-        final items = saleData['items'] as List<dynamic>;
-
-        // Satışı RPC üzerinden atomik olarak gerçekleştir
-        final rpcItems = items.map((item) => {
-              'product_id': item['product_id'],
-              'quantity': item['quantity'],
-            }).toList();
-
-        await Supabase.instance.client.rpc('complete_sale', params: {
-          'p_items': rpcItems,
-        });
-      } catch (e) {
-        failedSales.add(saleJson);
-      }
-    }
-
-    await prefs.setStringList('offline_sales', failedSales);
-    ref.invalidate(dashboardStatsProvider);
-  }
-
-  // ---------------------------------------------------------------------------
   // ANA SATIŞ METODU
   // ---------------------------------------------------------------------------
   // GÜVENLİK NOTU:
   //   Online satış complete_sale RPC üzerinden atomik olarak gerçekleşir.
   //   isletme_id, created_by, unit_price ve total_amount DB tarafında belirlenir.
   //   Client manipülasyonu imkânsız kılınmıştır.
-  //   Offline satış P1'de ayrıca ele alınacak.
+  //
+  // IDEMPOTENCY:
+  //   Her satışa (online veya offline) UUID v4 idempotency key atanır.
+  //   DB tarafındaki UNIQUE(idempotency_key) ile tekrar gönderim koruması sağlanır.
+  //
+  // ÇEVRİMDIŞI:
+  //   İnternet yoksa satış OfflineSaleQueue'ya eklenir. Bağlantı geldiğinde
+  //   connectivity listener otomatik olarak syncAll() tetikler.
   Future<String?> completeSale() async {
     if (state.isEmpty) return 'Sepet boş!';
 
@@ -257,31 +195,41 @@ class CartNotifier extends Notifier<List<CartItem>> {
     final userId = client.auth.currentUser?.id;
     if (userId == null) return 'Kullanıcı girişi bulunamadı!';
 
+    // Sepet verilerini RPC formatına çevir — sadece product_id ve quantity.
+    // Fiyat, tenant, kullanıcı bilgileri sunucudan alınır.
+    final items = state
+        .map((item) => {
+              'product_id': item.product_id,
+              'quantity': item.quantity,
+            })
+        .toList();
+
     // İnternet kontrolü
     final connectivityResult = await Connectivity().checkConnectivity();
     final bool isOffline = connectivityResult.contains(ConnectivityResult.none);
 
     if (isOffline) {
-      // Çevrimdışı mod: isletme_id'yi LocalStorage'dan al
-      // (Çevrimdışıyken Supabase'e ulaşamayız — yerel cache kullanmak zorundayız.)
+      // Çevrimdışı mod: OfflineSaleQueue'ya ekle
       // Güvenlik notu: Supabase'e gönderildiğinde RLS + trigger doğrulayacak.
-      final isletmeId = await LocalStorageService.getIsletmeId();
-      if (isletmeId == null) {
-        return 'İşletme bilgisi bulunamadı. Lütfen tekrar giriş yapın.';
-      }
-
-      await _saveSaleToLocal(userId, isletmeId, totalAmount, state);
+      // isletme_id, created_by ve fiyat bilgileri DB tarafında belirlenecek.
+      await _queue.enqueue(
+        idempotencyKey: _queue.generateKey(),
+        items: items,
+      );
       clearCart();
       return 'İnternet bağlantısı yok. Satış telefona kaydedildi, '
           'bağlantı geldiğinde sisteme aktarılacak.';
     }
 
-    // Çevrimiçi mod: Önce bekleyen çevrimdışı satışları gönder
-    await syncOfflineSales();
+    // Çevrimiçi mod: Önce bekleyen çevrimdışı satışları senkronize et
+    final synced = await _queue.syncAll();
+    if (synced > 0) {
+      ref.invalidate(dashboardStatsProvider);
+    }
 
     try {
       // -----------------------------------------------------------------------
-      // P0.2: Tek atomik RPC çağrısı — complete_sale
+      // Tek atomik RPC çağrısı — complete_sale
       //
       // GÜVENLİK:
       //   • isletme_id ve created_by DB tarafında auth.uid() ile belirlenir.
@@ -291,20 +239,19 @@ class CartNotifier extends Notifier<List<CartItem>> {
       //     transaction içinde gerçekleşir — kısmen başarı imkânsız.
       //   • FOR UPDATE ORDER BY id kilidi ile race condition koruması sağlanır.
       //
-      // PARAMETRELER:
-      //   p_items: [{product_id: uuid, quantity: int}] — sadece ürün kimliği ve adet.
-      //   Fiyat, tenant, kullanıcı bilgileri sunucudan alınır.
+      // IDEMPOTENCY:
+      //   • p_idempotency_key: UUID v4 — tekrar gönderim koruması.
+      //   • DB'de UNIQUE constraint. Duplicate key gelirse mevcut satış döndürülür.
       // -----------------------------------------------------------------------
-      final items = state
-          .map((item) => {
-                'product_id': item.product_id,
-                'quantity': item.quantity,
-              })
-          .toList();
+      final idempotencyKey = _queue.generateKey();
 
-      await client.rpc('complete_sale', params: {'p_items': items});
+      await client.rpc('complete_sale', params: {
+        'p_items': items,
+        'p_idempotency_key': idempotencyKey,
+      });
 
       clearCart();
+      ref.invalidate(dashboardStatsProvider);
       return null; // Başarılı
     } on PostgrestException catch (e) {
       // DB fonksiyonu SATIS_HATA:* prefix'li mesajlar fırlatır

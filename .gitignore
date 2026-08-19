@@ -38,3 +38,4 @@ app.*.map.json
 
 # Environment variables (hassas anahtarlar)
 .env
+supabase/.temp/
