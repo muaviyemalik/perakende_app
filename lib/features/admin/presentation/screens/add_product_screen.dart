@@ -5,6 +5,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../../../core/providers/supabase_provider.dart';
 import '../../../../core/providers/tenant_provider.dart';
+import '../../../../core/utils/barcode_utils.dart';
 
 class AddProductScreen extends ConsumerStatefulWidget {
   const AddProductScreen({super.key});
@@ -69,6 +70,9 @@ class _AddProductScreenState extends ConsumerState<AddProductScreen> {
   String? _validateBarcode(String? value) {
     if (value == null || value.isEmpty) {
       return 'Barkod gerekli';
+    }
+    if (!BarcodeUtils.isValidBarcode(value)) {
+      return 'Barkod sadece rakamlardan oluşmalıdır';
     }
     return null;
   }
@@ -191,6 +195,17 @@ class _AddProductScreenState extends ConsumerState<AddProductScreen> {
                         for (final barcode in barcodes) {
                           if (barcode.rawValue != null &&
                               barcode.rawValue!.isNotEmpty) {
+                            if (!BarcodeUtils.isValidBarcode(barcode.rawValue!)) {
+                              ScaffoldMessenger.of(context).clearSnackBars();
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Geçersiz barkod: Sadece rakam içermelidir.'),
+                                  backgroundColor: Colors.red,
+                                  duration: Duration(seconds: 2),
+                                ),
+                              );
+                              continue;
+                            }
                             setState(() {
                               _barcodeController.text = barcode.rawValue!;
                               _barcodeController.selection =
@@ -305,6 +320,8 @@ class _AddProductScreenState extends ConsumerState<AddProductScreen> {
                 TextFormField(
                   controller: _barcodeController,
                   enabled: !_isLoading,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: BarcodeUtils.barcodeInputFormatters,
                   decoration: InputDecoration(
                     labelText: 'Barkod',
                     hintText: 'Örn: 8680000000000',
