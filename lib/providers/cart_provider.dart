@@ -1,60 +1,10 @@
-import 'dart:convert';
-
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/services/offline_sale_queue.dart';
 import 'dashboard_stats_provider.dart';
 
-// =============================================================================
-// ÜRÜNLERİ YEREL HAFIZAYA KAYDET (İnternet Varken Arka Planda Çalışır)
-// =============================================================================
-// GÜVENLİK: isletmeId parametre olarak alınır — asla LocalStorage'dan türetilmez.
-// Bu değer auth oturumundan gelen kullanıcının gerçek işletmesidir.
-Future<void> cacheProductsLocally(int isletmeId) async {
-  try {
-    // Yalnızca kullanıcının işletmesine ait ürünleri cachele
-    final response = await Supabase.instance.client
-        .from('products')
-        .select()
-        .eq('isletme_id', isletmeId); // Tenant filtresi
-    final prefs = await SharedPreferences.getInstance();
-    String encodedData = jsonEncode(response);
-    await prefs.setString('cached_products_$isletmeId', encodedData);
-  } catch (e) {
-    // İnternet yoksa veya hata olursa sessizce geç
-  }
-}
-
-// =============================================================================
-// ÜRÜNLERİ GETİR (İnternet varsa buluttan al + önbellekle, yoksa telefondan oku)
-// =============================================================================
-// GÜVENLİK: isletmeId parametre olarak alınır — asla LocalStorage'dan türetilmez.
-// Çevrimdışı cache, işletme bazlı key ile saklanır (çapraz işletme karışıklığı engeli).
-Future<List<dynamic>> getProductsSmart(int isletmeId) async {
-  final prefs = await SharedPreferences.getInstance();
-  final cacheKey = 'cached_products_$isletmeId';
-
-  try {
-    // İnternet varsa: Yalnızca bu işletmenin ürünlerini çek + cachele
-    final response = await Supabase.instance.client
-        .from('products')
-        .select()
-        .eq('isletme_id', isletmeId); // Tenant filtresi
-
-    await prefs.setString(cacheKey, jsonEncode(response));
-    return response;
-  } catch (e) {
-    // İnternet yok: Bu işletmeye ait yerel cache'den oku
-    final cachedData = prefs.getString(cacheKey);
-    if (cachedData != null) {
-      return jsonDecode(cachedData) as List<dynamic>;
-    }
-    return [];
-  }
-}
 
 // =============================================================================
 // CartItem Model

@@ -3,8 +3,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../../../core/utils/barcode_utils.dart';
-import '../../../../providers/cart_provider.dart';
 import '../../../../providers/product_provider.dart';
+import '../../../../providers/cart_provider.dart';
+import '../../../../core/database/offline_mutation_dao.dart';
+import '../../../../core/providers/tenant_provider.dart';
 import '../providers/auth_provider.dart';
 
 class EmployeeDashboardScreen extends ConsumerStatefulWidget {
@@ -136,6 +138,40 @@ class _EmployeeDashboardScreenState
   }
 
   Future<void> _handleLogout() async {
+    final isletmeId = await ref.read(currentIsletmeIdProvider.future);
+    if (isletmeId != null) {
+      final pendingMutations =
+          await OfflineMutationDao.instance.getPendingMutations(isletmeId);
+      if (pendingMutations.isNotEmpty) {
+        if (!mounted) return;
+        final confirm = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Uyarı'),
+            content: const Text(
+                'Senkronize edilmemiş ürün değişiklikleri var. '
+                'Çıkış yaparsanız bu değişiklikler silinecektir. '
+                'Yine de çıkış yapmak istiyor musunuz?'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('İptal'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                child: const Text(
+                  'Çıkış Yap',
+                  style: TextStyle(color: Colors.red),
+                ),
+              ),
+            ],
+          ),
+        );
+
+        if (confirm != true) return;
+      }
+    }
+
     setState(() => _isLoggingOut = true);
 
     try {

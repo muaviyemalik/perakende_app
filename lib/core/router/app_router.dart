@@ -10,6 +10,7 @@ import '../../features/auth/presentation/screens/employee_dashboard_screen.dart'
 import '../../features/auth/presentation/screens/force_change_password_screen.dart';
 import '../../features/auth/presentation/screens/login_screen.dart';
 import '../../features/products/presentation/screens/test_screen.dart';
+import '../../features/admin/presentation/screens/edit_product_screen.dart';
 
 String? _homeDestination(AsyncValue<String?> kullaniciRol) {
   return kullaniciRol.maybeWhen(
@@ -120,6 +121,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: '/sales-history',
         builder: (context, state) {
           return const SalesHistoryScreen();
+        },
+      ),
+      GoRoute(
+        path: '/edit-product',
+        builder: (context, state) {
+          final product = state.extra as Map<String, dynamic>;
+          return EditProductScreen(product: product);
         },
       ),
     ],

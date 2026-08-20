@@ -3,6 +3,9 @@ import 'dart:developer' as developer;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../../core/database/local_product_dao.dart';
+import '../../../../core/database/offline_mutation_dao.dart';
+import '../../../../core/database/sync_metadata_dao.dart';
 import '../../../../core/providers/supabase_provider.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../data/kullanici_servisi.dart';
@@ -105,6 +108,14 @@ final sifreDegistiMiProvider = FutureProvider<bool?>((ref) async {
 });
 
 Future<void> performLogout(WidgetRef ref) async {
+  // İşletme verilerini ve senkronizasyon geçmişini yerel cihazdan temizle
+  final isletmeId = await LocalStorageService.getIsletmeId();
+  if (isletmeId != null) {
+    await LocalProductDao.instance.deleteAllForIsletme(isletmeId);
+    await SyncMetadataDao.instance.clearForIsletme(isletmeId);
+    await OfflineMutationDao.instance.clearForIsletme(isletmeId);
+  }
+
   await LocalStorageService.clearIsletmeId();
   ref.invalidate(kullaniciProvider);
   await ref.read(supabaseClientProvider).auth.signOut();
@@ -116,6 +127,15 @@ Future<void> cleanupFailedAuthSession(WidgetRef ref) async {
     name: _logTag,
     level: 900,
   );
+  
+  // İşletme verilerini ve senkronizasyon geçmişini yerel cihazdan temizle
+  final isletmeId = await LocalStorageService.getIsletmeId();
+  if (isletmeId != null) {
+    await LocalProductDao.instance.deleteAllForIsletme(isletmeId);
+    await SyncMetadataDao.instance.clearForIsletme(isletmeId);
+    await OfflineMutationDao.instance.clearForIsletme(isletmeId);
+  }
+
   await LocalStorageService.clearIsletmeId();
   ref.invalidate(kullaniciProvider);
   try {
