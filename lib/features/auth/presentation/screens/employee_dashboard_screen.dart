@@ -29,6 +29,11 @@ class _EmployeeDashboardScreenState
   final FocusNode _manualBarcodeFocus = FocusNode();
   bool _isSearchingManualBarcode = false;
   bool _showManualBarcodeField = false;
+  int _selectedQuantity = 1;
+
+  bool _isFastScanMode = false;
+  String _lastProcessedBarcode = '';
+  DateTime? _lastScanTime;
 
   Future<void> _handleManualBarcodeSubmit(String value) async {
     final barcode = value.trim();
@@ -46,6 +51,17 @@ class _EmployeeDashboardScreenState
       return;
     }
 
+    if (!_isFastScanMode) {
+      setState(() {
+        _scannedBarcode = barcode;
+        _showManualBarcodeField = false;
+        _selectedQuantity = 1;
+      });
+      _manualBarcodeController.clear();
+      FocusScope.of(context).unfocus();
+      return;
+    }
+
     setState(() {
       _isSearchingManualBarcode = true;
     });
@@ -60,20 +76,32 @@ class _EmployeeDashboardScreenState
         final price = rawPrice is num ? rawPrice.toDouble() : 0.0;
         final productId = (product['id'] ?? barcode).toString();
 
-        ref.read(cartProvider.notifier).addToCart(
+        final stock = product['stock'] ?? 0;
+        final error = ref.read(cartProvider.notifier).addToCart(
               productId: productId,
               name: name,
               price: price,
+              stock: stock,
             );
 
         ScaffoldMessenger.of(context).clearSnackBars();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('$name sepete eklendi!'),
-            backgroundColor: Colors.green,
-            duration: const Duration(seconds: 2),
-          ),
-        );
+        if (error != null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(error),
+              backgroundColor: Colors.red,
+              duration: const Duration(seconds: 2),
+            ),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('$name sepete eklendi!'),
+              backgroundColor: Colors.green,
+              duration: const Duration(seconds: 2),
+            ),
+          );
+        }
         _manualBarcodeController.clear();
         setState(() {
           _showManualBarcodeField = false;
@@ -181,10 +209,15 @@ class _EmployeeDashboardScreenState
                                     children: [
                                       IconButton(
                                         onPressed: () {
-                                          cartNotifier.updateQuantity(
+                                          final error = cartNotifier.updateQuantity(
                                             item.product_id,
                                             delta: -1,
                                           );
+                                          if (error != null) {
+                                            ScaffoldMessenger.of(context).showSnackBar(
+                                              SnackBar(content: Text(error), backgroundColor: Colors.red),
+                                            );
+                                          }
                                         },
                                         icon: const Icon(
                                             Icons.remove_circle_outline),
@@ -198,10 +231,15 @@ class _EmployeeDashboardScreenState
                                       ),
                                       IconButton(
                                         onPressed: () {
-                                          cartNotifier.updateQuantity(
+                                          final error = cartNotifier.updateQuantity(
                                             item.product_id,
                                             delta: 1,
                                           );
+                                          if (error != null) {
+                                            ScaffoldMessenger.of(context).showSnackBar(
+                                              SnackBar(content: Text(error), backgroundColor: Colors.red),
+                                            );
+                                          }
                                         },
                                         icon: const Icon(
                                             Icons.add_circle_outline),
@@ -347,300 +385,537 @@ class _EmployeeDashboardScreenState
     return Column(
       children: [
         Expanded(
-          flex: 2,
-          child: MobileScanner(
-            controller: _cameraController,
-            onDetect: (capture) {
-              final List<Barcode> barcodes = capture.barcodes;
-              for (final barcode in barcodes) {
-                final rawValue = barcode.rawValue;
-                if (rawValue != null && rawValue.isNotEmpty) {
-                  if (rawValue != _scannedBarcode) {
-                    if (BarcodeUtils.isValidBarcode(rawValue)) {
-                      setState(() {
-                        _scannedBarcode = rawValue;
-                      });
-                    } else if (rawValue != _lastInvalidBarcode) {
-                      setState(() {
-                        _lastInvalidBarcode = rawValue;
-                      });
-                      ScaffoldMessenger.of(context).clearSnackBars();
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Geçersiz barkod: Sadece rakam içermelidir.'),
-                          backgroundColor: Colors.red,
-                          duration: Duration(seconds: 2),
-                        ),
-                      );
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              MobileScanner(
+                controller: _cameraController,
+                onDetect: (capture) async {
+                  final List<Barcode> barcodes = capture.barcodes;
+                  for (final barcode in barcodes) {
+                    final rawValue = barcode.rawValue;
+                    if (rawValue != null && rawValue.isNotEmpty) {
+                      final now = DateTime.now();
+
+                      if (rawValue == _lastProcessedBarcode && _lastScanTime != null) {
+                        final timeSinceLastScan = now.difference(_lastScanTime!).inMilliseconds;
+                        _lastScanTime = now; // Her algılamada zamanı ileri al (kamerada kaldığını gösterir)
+                        
+                        if (timeSinceLastScan < 1500) {
+                          continue; // 1.5 saniyeden kısa süre önce yine görüldüyse, henüz kameradan çıkmamıştır. IGNORE.
+                        }
+                      } else {
+                        _lastProcessedBarcode = rawValue;
+                        _lastScanTime = now;
+                      }
+
+                      if (!BarcodeUtils.isValidBarcode(rawValue)) {
+                        if (rawValue != _lastInvalidBarcode) {
+                          setState(() {
+                            _lastInvalidBarcode = rawValue;
+                          });
+                          ScaffoldMessenger.of(context).clearSnackBars();
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Geçersiz barkod: Sadece rakam içermelidir.'),
+                              backgroundColor: Colors.red,
+                              duration: Duration(seconds: 2),
+                            ),
+                          );
+                        }
+                        continue;
+                      }
+
+                      if (_isFastScanMode) {
+                        setState(() {
+                          _scannedBarcode = '';
+                        });
+                        final product = await ref.read(productByBarcodeProvider(rawValue).future);
+                        if (!mounted) return;
+
+                        if (product != null) {
+                          final name = product['name'] ?? 'Bilinmeyen ürün';
+                          final rawPrice = product['price'];
+                          final price = rawPrice is num ? rawPrice.toDouble() : 0.0;
+                          final productId = (product['id'] ?? rawValue).toString();
+
+                          final stock = product['stock'] ?? 0;
+                          final error = ref.read(cartProvider.notifier).addToCart(
+                                productId: productId,
+                                name: name,
+                                price: price,
+                                stock: stock,
+                              );
+
+                          ScaffoldMessenger.of(context).clearSnackBars();
+                          if (error != null) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(error),
+                                backgroundColor: Colors.red,
+                                duration: const Duration(seconds: 2),
+                              ),
+                            );
+                          } else {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('$name sepete eklendi!'),
+                                backgroundColor: Colors.green,
+                                duration: const Duration(milliseconds: 1000),
+                              ),
+                            );
+                          }
+                        } else {
+                          ScaffoldMessenger.of(context).clearSnackBars();
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Bu barkoda ait ürün bulunamadı!'),
+                              backgroundColor: Colors.red,
+                              duration: Duration(seconds: 2),
+                            ),
+                          );
+                        }
+                      } else {
+                        if (rawValue != _scannedBarcode) {
+                          setState(() {
+                            _scannedBarcode = rawValue;
+                            _selectedQuantity = 1;
+                          });
+                        } else {
+                          ref.invalidate(productByBarcodeProvider(_scannedBarcode));
+                          ScaffoldMessenger.of(context).clearSnackBars();
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Ürün bilgileri güncellendi.'),
+                              backgroundColor: Colors.blue,
+                              duration: Duration(milliseconds: 1000),
+                            ),
+                          );
+                        }
+                      }
+                      break;
                     }
                   }
-                  break;
-                }
-              }
-            },
-          ),
-        ),
-        Expanded(
-          flex: 3,
-          child: Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Card(
-              elevation: 4,
-              child: Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: SingleChildScrollView(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.center,
+                },
+              ),
+              Positioned(
+                top: 16,
+                right: 16,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.7),
+                    borderRadius: BorderRadius.circular(24),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      if (_showManualBarcodeField) ...[
-                        TextField(
-                          controller: _manualBarcodeController,
-                          focusNode: _manualBarcodeFocus,
-                          keyboardType: TextInputType.number,
-                          inputFormatters: BarcodeUtils.barcodeInputFormatters,
-                          textInputAction: TextInputAction.search,
-                          decoration: InputDecoration(
-                            hintText: 'Barkodu manuel girin...',
-                            prefixIcon: const Icon(Icons.barcode_reader),
-                            suffixIcon: IconButton(
-                              icon: const Icon(Icons.close),
-                              onPressed: () {
-                                setState(() {
-                                  _showManualBarcodeField = false;
-                                  _manualBarcodeController.clear();
-                                });
-                              },
-                            ),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            filled: true,
-                            fillColor: Colors.grey.shade50,
-                          ),
-                          onSubmitted: _handleManualBarcodeSubmit,
+                      const Text(
+                        'Hızlı Okutma',
+                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(width: 8),
+                      SizedBox(
+                        height: 24,
+                        width: 40,
+                        child: Switch(
+                          value: _isFastScanMode,
+                          onChanged: (val) {
+                            setState(() {
+                              _isFastScanMode = val;
+                              if (val) {
+                                _scannedBarcode = '';
+                              }
+                            });
+                          },
+                          activeTrackColor: Colors.green,
                         ),
-                        const SizedBox(height: 16),
-                        if (_isSearchingManualBarcode)
-                          const CircularProgressIndicator(),
-                      ] else ...[
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              if (_scannedBarcode.isEmpty && !_showManualBarcodeField)
+                Align(
+                  alignment: Alignment.bottomCenter,
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: 32),
+                    child: GestureDetector(
+                      onTap: () {
+                        setState(() {
+                          _showManualBarcodeField = true;
+                        });
+                        _manualBarcodeFocus.requestFocus();
+                      },
+                      behavior: HitTestBehavior.opaque,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.7),
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: const Column(
+                          mainAxisSize: MainAxisSize.min,
                           children: [
-                            const Text(
-                              'Son Okutulan Barkod:',
+                            Icon(Icons.qr_code_scanner, size: 32, color: Colors.white),
+                            SizedBox(height: 8),
+                            Text(
+                              'Barkod bekleniyor...\n(Manuel giriş için tıklayın)',
+                              textAlign: TextAlign.center,
                               style: TextStyle(
                                 fontSize: 14,
-                                color: Colors.grey,
-                                fontWeight: FontWeight.w500,
+                                color: Colors.white,
                               ),
-                            ),
-                            IconButton(
-                              icon: const Icon(Icons.edit, size: 20, color: Colors.blue),
-                              onPressed: () {
-                                setState(() {
-                                  _showManualBarcodeField = true;
-                                });
-                                _manualBarcodeFocus.requestFocus();
-                              },
-                              tooltip: 'Manuel barkod gir',
                             ),
                           ],
                         ),
-                        const SizedBox(height: 4),
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: Colors.blue.shade50,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.blue.shade200),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        if (_showManualBarcodeField || _scannedBarcode.isNotEmpty)
+          Container(
+            color: Colors.white,
+            padding: const EdgeInsets.all(16.0),
+            child: SafeArea(
+              top: false,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    if (_showManualBarcodeField) ...[
+                      TextField(
+                        controller: _manualBarcodeController,
+                        focusNode: _manualBarcodeFocus,
+                        keyboardType: TextInputType.number,
+                        inputFormatters: BarcodeUtils.barcodeInputFormatters,
+                        textInputAction: TextInputAction.search,
+                        decoration: InputDecoration(
+                          hintText: 'Barkodu manuel girin...',
+                          prefixIcon: const Icon(Icons.barcode_reader),
+                          suffixIcon: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (_isSearchingManualBarcode)
+                                const Padding(
+                                  padding: EdgeInsets.all(12.0),
+                                  child: SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(strokeWidth: 2),
+                                  ),
+                                )
+                              else
+                                IconButton(
+                                  icon: const Icon(Icons.search),
+                                  onPressed: () {
+                                    _handleManualBarcodeSubmit(_manualBarcodeController.text);
+                                  },
+                                ),
+                              IconButton(
+                                icon: const Icon(Icons.close),
+                                onPressed: () {
+                                  setState(() {
+                                    _showManualBarcodeField = false;
+                                    _manualBarcodeController.clear();
+                                  });
+                                  FocusScope.of(context).unfocus();
+                                },
+                              ),
+                            ],
                           ),
-                          child: Text(
-                            _scannedBarcode.isEmpty
-                                ? 'Bekleniyor...'
-                                : _scannedBarcode,
-                            textAlign: TextAlign.center,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          filled: true,
+                          fillColor: Colors.grey.shade50,
+                        ),
+                        onSubmitted: _handleManualBarcodeSubmit,
+                      ),
+                    ] else if (_scannedBarcode.isNotEmpty) ...[
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Text(
+                            'Son Okutulan Barkod:',
                             style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.blue.shade700,
+                              fontSize: 14,
+                              color: Colors.grey,
+                              fontWeight: FontWeight.w500,
                             ),
                           ),
-                        ),
-                        const SizedBox(height: 16),
-                        const Divider(),
-                        const SizedBox(height: 16),
-                        if (_scannedBarcode.isEmpty)
-                          GestureDetector(
-                            onTap: () {
+                          IconButton(
+                            icon: const Icon(Icons.edit, size: 20, color: Colors.blue),
+                            onPressed: () {
                               setState(() {
                                 _showManualBarcodeField = true;
                               });
                               _manualBarcodeFocus.requestFocus();
                             },
-                            behavior: HitTestBehavior.opaque,
-                            child: Container(
-                              width: double.infinity,
-                              padding: const EdgeInsets.all(32.0),
-                              child: const Column(
+                            tooltip: 'Manuel barkod gir',
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.blue.shade50,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.blue.shade200),
+                        ),
+                        child: Text(
+                          _scannedBarcode,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.blue.shade700,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      const Divider(),
+                      const SizedBox(height: 16),
+                      productAsync!.when(
+                        loading: () => const Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              CircularProgressIndicator(),
+                              SizedBox(height: 12),
+                              Text(
+                                'Ürün aranıyor...',
+                                style: TextStyle(fontSize: 16),
+                              ),
+                            ],
+                          ),
+                        ),
+                        error: (error, stackTrace) => Center(
+                          child: Text(
+                            'Hata: $error',
+                            style: const TextStyle(
+                              color: Colors.red,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                        data: (product) {
+                          if (product == null) {
+                            return const Center(
+                              child: Text(
+                                'Bu barkoda ait kayıtlı ürün bulunamadı!',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  color: Colors.red,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            );
+                          }
+                          final name = product['name'] ?? 'Bilinmeyen ürün';
+                          final rawPrice = product['price'];
+                          final price = rawPrice is num ? rawPrice : 0;
+                          final stock = product['stock'] ?? 0;
+                          final productId = (product['id'] ?? _scannedBarcode).toString();
+                          final unitPrice = price.toDouble();
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            children: [
+                              const Text(
+                                'Ürün Bilgileri:',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: Colors.grey,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              Text(
+                                name,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.black87,
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              Text(
+                                'Fiyat: ₺${unitPrice.toStringAsFixed(2)}',
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  fontSize: 26,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.green,
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              Text(
+                                'Stok: $stock adet',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w500,
+                                  color: Colors.grey.shade700,
+                                ),
+                              ),
+                              const SizedBox(height: 20),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
-                                  Icon(Icons.qr_code_scanner, size: 48, color: Colors.grey),
-                                  SizedBox(height: 16),
-                                  Text(
-                                    'Barkod bekleniyor...\n(Manuel giriş için tıklayın)',
-                                    textAlign: TextAlign.center,
-                                    style: TextStyle(
-                                      fontSize: 16,
-                                      color: Colors.grey,
+                                  IconButton(
+                                    onPressed: _selectedQuantity > 1
+                                        ? () {
+                                            setState(() {
+                                              _selectedQuantity--;
+                                            });
+                                          }
+                                        : null,
+                                    icon: const Icon(Icons.remove_circle_outline),
+                                    color: Colors.blue,
+                                    iconSize: 32,
+                                  ),
+                                  const SizedBox(width: 16),
+                                  InkWell(
+                                    onTap: () async {
+                                      final controller = TextEditingController(text: _selectedQuantity.toString());
+                                      final result = await showDialog<int>(
+                                        context: context,
+                                        builder: (context) => AlertDialog(
+                                          title: const Text('Miktar Girin'),
+                                          content: TextField(
+                                            controller: controller,
+                                            keyboardType: TextInputType.number,
+                                            decoration: const InputDecoration(
+                                              hintText: 'Adet',
+                                            ),
+                                            autofocus: true,
+                                          ),
+                                          actions: [
+                                            TextButton(
+                                              onPressed: () => Navigator.pop(context),
+                                              child: const Text('İptal'),
+                                            ),
+                                            TextButton(
+                                              onPressed: () {
+                                                final val = int.tryParse(controller.text);
+                                                Navigator.pop(context, val);
+                                              },
+                                              child: const Text('Tamam'),
+                                            ),
+                                          ],
+                                        ),
+                                      );
+                                      if (result != null && result > 0) {
+                                        if (result > stock) {
+                                          ScaffoldMessenger.of(context).showSnackBar(
+                                            SnackBar(content: Text('Stokta yalnızca $stock adet bulunuyor.'), backgroundColor: Colors.red),
+                                          );
+                                        } else {
+                                          setState(() {
+                                            _selectedQuantity = result;
+                                          });
+                                        }
+                                      }
+                                    },
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                                      child: Text(
+                                        '$_selectedQuantity',
+                                        style: const TextStyle(
+                                          fontSize: 24,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
                                     ),
+                                  ),
+                                  IconButton(
+                                    onPressed: _selectedQuantity < stock
+                                        ? () {
+                                            setState(() {
+                                              _selectedQuantity++;
+                                            });
+                                          }
+                                        : null,
+                                    icon: const Icon(Icons.add_circle_outline),
+                                    color: Colors.blue,
+                                    iconSize: 32,
                                   ),
                                 ],
                               ),
-                            ),
-                          )
-                        else
-                          productAsync!.when(
-                          loading: () => const Center(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                CircularProgressIndicator(),
-                                SizedBox(height: 12),
-                                Text(
-                                  'Ürün aranıyor...',
-                                  style: TextStyle(fontSize: 16),
-                                ),
-                              ],
-                            ),
-                          ),
-                          error: (error, stackTrace) => Center(
-                            child: Text(
-                              'Hata: $error',
-                              style: const TextStyle(
-                                color: Colors.red,
-                                fontSize: 16,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ),
-                          data: (product) {
-                            if (product == null) {
-                              return const Center(
-                                child: Text(
-                                  'Bu barkoda ait kayıtlı ürün bulunamadı!',
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(
-                                    color: Colors.red,
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                              );
-                            }
-
-                            final name = product['name'] ?? 'Bilinmeyen ürün';
-                            final rawPrice = product['price'];
-                            final price = rawPrice is num ? rawPrice : 0;
-                            final stock = product['stock'] ?? 0;
-
-                            final productId =
-                                (product['id'] ?? _scannedBarcode).toString();
-                            final unitPrice = price.toDouble();
-
-                            return Column(
-                              crossAxisAlignment: CrossAxisAlignment.center,
-                              children: [
-                                const Text(
-                                  'Ürün Bilgileri:',
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    color: Colors.grey,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                                const SizedBox(height: 12),
-                                Text(
-                                  name,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                  textAlign: TextAlign.center,
-                                  style: const TextStyle(
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.w600,
-                                    color: Colors.black87,
-                                  ),
-                                ),
-                                const SizedBox(height: 12),
-                                Text(
-                                  'Fiyat: ₺${unitPrice.toStringAsFixed(2)}',
-                                  textAlign: TextAlign.center,
-                                  style: const TextStyle(
-                                    fontSize: 26,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.green,
-                                  ),
-                                ),
-                                const SizedBox(height: 12),
-                                Text(
-                                  'Stok: $stock adet',
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w500,
-                                    color: Colors.grey.shade700,
-                                  ),
-                                ),
-                                const SizedBox(height: 20),
-                                SizedBox(
-                                  width: double.infinity,
-                                  child: ElevatedButton.icon(
-                                    onPressed: () {
-                                      ref.read(cartProvider.notifier).addToCart(
-                                            productId: productId,
-                                            name: name,
-                                            price: unitPrice,
-                                          );
-                                      ScaffoldMessenger.of(context)
-                                          .showSnackBar(
-                                        const SnackBar(
-                                          content: Text('Ürün sepete eklendi'),
-                                          duration: Duration(seconds: 2),
+                              const SizedBox(height: 16),
+                              SizedBox(
+                                width: double.infinity,
+                                child: ElevatedButton.icon(
+                                  onPressed: () {
+                                    final error = ref.read(cartProvider.notifier).addToCart(
+                                          productId: productId,
+                                          name: name,
+                                          price: unitPrice,
+                                          stock: stock,
+                                          quantity: _selectedQuantity,
+                                        );
+                                    if (error != null) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(
+                                          content: Text(error),
+                                          backgroundColor: Colors.red,
                                         ),
                                       );
-                                    },
-                                    icon: const Icon(Icons.add_shopping_cart),
-                                    label: const Text(
-                                      'Sepete Ekle',
-                                      style: TextStyle(
-                                        fontSize: 18,
-                                        fontWeight: FontWeight.bold,
-                                      ),
+                                    } else {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(
+                                          content: Text('$_selectedQuantity adet ürün sepete eklendi'),
+                                          duration: const Duration(seconds: 2),
+                                        ),
+                                      );
+                                      setState(() {
+                                        _scannedBarcode = '';
+                                        _showManualBarcodeField = false;
+                                        _selectedQuantity = 1;
+                                      });
+                                    }
+                                  },
+                                  icon: const Icon(Icons.add_shopping_cart),
+                                  label: const Text(
+                                    'Sepete Ekle',
+                                    style: TextStyle(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.bold,
                                     ),
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: Colors.green,
-                                      foregroundColor: Colors.white,
-                                      padding: const EdgeInsets.symmetric(
-                                        vertical: 16,
-                                      ),
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(12),
-                                      ),
+                                  ),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.green,
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 16,
+                                    ),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12),
                                     ),
                                   ),
                                 ),
-                              ],
-                            );
-                          },
-                        ),
-                      ],
+                              ),
+                            ],
+                          );
+                        },
+                      ),
                     ],
-                  ),
+                  ],
                 ),
               ),
             ),
           ),
-        ),
       ],
     );
   }
@@ -826,20 +1101,33 @@ class _EmployeeDashboardScreenState
                         ),
                       ),
                       onTap: () {
-                        ref.read(cartProvider.notifier).addToCart(
+                        final stock = product['stock'] ?? 0;
+                        final error = ref.read(cartProvider.notifier).addToCart(
                               productId: productId,
                               name: name,
                               price: price,
+                              stock: stock,
                             );
                         ScaffoldMessenger.of(context).clearSnackBars();
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text('$name sepete eklendi!'),
-                            backgroundColor: Colors.green,
-                            duration: const Duration(seconds: 1),
-                            behavior: SnackBarBehavior.floating,
-                          ),
-                        );
+                        if (error != null) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(error),
+                              backgroundColor: Colors.red,
+                              duration: const Duration(seconds: 2),
+                              behavior: SnackBarBehavior.floating,
+                            ),
+                          );
+                        } else {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('$name sepete eklendi!'),
+                              backgroundColor: Colors.green,
+                              duration: const Duration(seconds: 1),
+                              behavior: SnackBarBehavior.floating,
+                            ),
+                          );
+                        }
                       },
                     );
                   },

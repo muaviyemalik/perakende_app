@@ -58,7 +58,18 @@ void main() {
     expect(getManualBarcodeField(), findsOneWidget); // should appear
   });
 
-  testWidgets('Manuel barkod girişi: geçerli barkod -> ürün sepete eklenir', (WidgetTester tester) async {
+  Future<void> toggleFastScan(WidgetTester tester, bool value) async {
+    final switchFinder = find.byType(Switch);
+    if (switchFinder.evaluate().isNotEmpty) {
+      final Switch switchWidget = tester.widget(switchFinder);
+      if (switchWidget.value != value) {
+        await tester.tap(switchFinder);
+        await tester.pumpAndSettle();
+      }
+    }
+  }
+
+  testWidgets('Manuel barkod girişi (Hızlı Okutma KAPALI): geçerli barkod -> ürün kartı açılır', (WidgetTester tester) async {
     final container = ProviderContainer(
       overrides: [
         productByBarcodeProvider.overrideWith((ref, barcode) {
@@ -80,12 +91,50 @@ void main() {
     await tester.testTextInput.receiveAction(TextInputAction.search);
 
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 50)); // for loading state
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.pumpAndSettle();
+
+    // The product info should be displayed, which includes the product name and "Sepete Ekle" button
+    expect(find.text('Ürün Bilgileri:'), findsOneWidget);
+    expect(find.text('Elma'), findsOneWidget);
+    expect(find.text('Sepete Ekle'), findsOneWidget);
+    expect(getManualBarcodeField(), findsNothing); // should hide after success
+
+    // Cart should be empty at this point
+    final cart = container.read(cartProvider);
+    expect(cart.length, 0);
+  });
+
+  testWidgets('Manuel barkod girişi (Hızlı Okutma AÇIK): geçerli barkod -> ürün sepete eklenir', (WidgetTester tester) async {
+    final container = ProviderContainer(
+      overrides: [
+        productByBarcodeProvider.overrideWith((ref, barcode) {
+          if (barcode == '12345') {
+            return Future.value(testProduct);
+          }
+          return Future.value(null);
+        }),
+      ],
+    );
+
+    await tester.pumpWidget(createWidget(container));
+    await tester.pumpAndSettle();
+    
+    await toggleFastScan(tester, true);
+
+    await openManualEntry(tester);
+
+    final textField = getManualBarcodeField();
+    await tester.enterText(textField, '12345');
+    await tester.testTextInput.receiveAction(TextInputAction.search);
+
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
     await tester.pumpAndSettle();
 
     expect(find.text('Elma sepete eklendi!'), findsOneWidget);
-    expect(getManualBarcodeField(), findsNothing); // should hide after success
-
+    expect(getManualBarcodeField(), findsNothing); 
+    
     final cart = container.read(cartProvider);
     expect(cart.length, 1);
     expect(cart.first.quantity, 1);
@@ -114,8 +163,8 @@ void main() {
     await tester.pump(const Duration(milliseconds: 50));
     await tester.pumpAndSettle();
 
-    expect(find.text('Bu barkoda ait ürün bulunamadı!'), findsOneWidget);
-    expect(getManualBarcodeField(), findsOneWidget); // stays open on error
+    expect(find.text('Bu barkoda ait kayıtlı ürün bulunamadı!'), findsOneWidget);
+    expect(getManualBarcodeField(), findsNothing); // field closes and shows product card with error
     
     final cart = container.read(cartProvider);
     expect(cart.length, 0);
@@ -172,7 +221,7 @@ void main() {
     expect(cart.length, 0);
   });
 
-  testWidgets('Manuel barkod girişi: aynı barkod -> miktar artar', (WidgetTester tester) async {
+  testWidgets('Manuel barkod girişi (Hızlı Okutma AÇIK): aynı barkod -> miktar artar', (WidgetTester tester) async {
     final container = ProviderContainer(
       overrides: [
         productByBarcodeProvider.overrideWith((ref, barcode) {
@@ -187,6 +236,8 @@ void main() {
     await tester.pumpWidget(createWidget(container));
     await tester.pumpAndSettle();
 
+    await toggleFastScan(tester, true);
+
     await openManualEntry(tester);
 
     final textField = getManualBarcodeField();
@@ -195,8 +246,11 @@ void main() {
     await tester.testTextInput.receiveAction(TextInputAction.search);
     await tester.pumpAndSettle();
 
-    // field is hidden after success, open it again
-    await openManualEntry(tester);
+    // field is not hidden in fast scan mode usually, but if it is, open it again
+    if (getManualBarcodeField().evaluate().isEmpty) {
+      await openManualEntry(tester);
+    }
+    
     final textField2 = getManualBarcodeField();
 
     await tester.enterText(textField2, '12345');
@@ -231,7 +285,8 @@ void main() {
     await tester.pump(const Duration(milliseconds: 50));
     await tester.pumpAndSettle();
 
-    expect(find.text('Bu barkoda ait ürün bulunamadı!'), findsOneWidget);
+    expect(find.text('Bu barkoda ait kayıtlı ürün bulunamadı!'), findsOneWidget);
+    expect(getManualBarcodeField(), findsNothing);
     
     final cart = container.read(cartProvider);
     expect(cart.length, 0);

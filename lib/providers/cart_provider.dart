@@ -65,12 +65,14 @@ class CartItem {
   final String name;
   final double price;
   final int quantity;
+  final int stock;
 
   const CartItem({
     required this.product_id,
     required this.name,
     required this.price,
     required this.quantity,
+    required this.stock,
   });
 
   CartItem copyWith({
@@ -79,12 +81,14 @@ class CartItem {
     String? name,
     double? price,
     int? quantity,
+    int? stock,
   }) {
     return CartItem(
       product_id: product_id ?? this.product_id,
       name: name ?? this.name,
       price: price ?? this.price,
       quantity: quantity ?? this.quantity,
+      stock: stock ?? this.stock,
     );
   }
 
@@ -116,22 +120,38 @@ class CartNotifier extends Notifier<List<CartItem>> {
     return [];
   }
 
-  void addToCart({
+  String? addToCart({
     required String productId,
     required String name,
     required double price,
+    required int stock,
+    int quantity = 1,
   }) {
+    if (stock <= 0) {
+      return 'Bu ürün stokta yok.';
+    }
+
     final existingIndex =
         state.indexWhere((item) => item.product_id == productId);
 
     if (existingIndex != -1) {
       final existingItem = state[existingIndex];
+      final newQuantity = existingItem.quantity + quantity;
+      
+      if (newQuantity > stock) {
+        return 'Stokta yalnızca $stock adet bulunuyor.';
+      }
+
       state = [
         ...state.sublist(0, existingIndex),
-        existingItem.copyWith(quantity: existingItem.quantity + 1),
+        existingItem.copyWith(quantity: newQuantity),
         ...state.sublist(existingIndex + 1),
       ];
-      return;
+      return null;
+    }
+
+    if (quantity > stock) {
+      return 'Stokta yalnızca $stock adet bulunuyor.';
     }
 
     state = [
@@ -140,12 +160,16 @@ class CartNotifier extends Notifier<List<CartItem>> {
         product_id: productId,
         name: name,
         price: price,
-        quantity: 1,
+        quantity: quantity,
+        stock: stock,
       ),
     ];
+    return null;
   }
 
-  void updateQuantity(String productId, {required int delta}) {
+  String? updateQuantity(String productId, {required int delta}) {
+    String? errorMessage;
+    
     final updatedItems = state
         .map((item) {
           if (item.product_id != productId) {
@@ -156,13 +180,22 @@ class CartNotifier extends Notifier<List<CartItem>> {
           if (nextQuantity <= 0) {
             return null;
           }
+          
+          if (nextQuantity > item.stock) {
+            errorMessage = 'Stokta yalnızca ${item.stock} adet bulunuyor.';
+            return item; // Değişiklik yapma, eski item'ı dön
+          }
 
           return item.copyWith(quantity: nextQuantity);
         })
         .whereType<CartItem>()
         .toList();
 
-    state = updatedItems;
+    if (errorMessage == null) {
+      state = updatedItems;
+    }
+    
+    return errorMessage;
   }
 
   void removeItem(String productId) {

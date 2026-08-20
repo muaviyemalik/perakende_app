@@ -40,3 +40,17 @@ final allProductsProvider =
 
   return List<Map<String, dynamic>>.from(response);
 });
+
+/// Ürün günceller
+final updateProductProvider = Provider((ref) {
+  return (String id, Map<String, dynamic> data) async {
+    final isletmeId = await ref.read(currentIsletmeIdProvider.future);
+    if (isletmeId == null) throw Exception('İşletme bilgisi bulunamadı.');
+
+    await Supabase.instance.client
+        .from('products')
+        .update(data)
+        .eq('id', id)
+        .eq('isletme_id', isletmeId); // Tenant filter
+  };
+});
