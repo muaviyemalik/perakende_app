@@ -1,0 +1,84 @@
+{
+  "date": "2026-08-21",
+  "decision": "NOT_READY_FOR_PRODUCTION",
+  "production_project_ref": "vnvifxvtutlbivsegjtp",
+  "scratch_project_ref": "sostibxqqvqulmyejymv",
+  "production_write_performed": false,
+  "checkpoint_files_modified": false,
+  "production_history_observed": {
+    "remote_only_versions": [
+      "20260817175921",
+      "20260817175945",
+      "20260817175955",
+      "20260817181420",
+      "20260817181445",
+      "20260817181504",
+      "20260818131542",
+      "20260818132659"
+    ],
+    "baseline_recorded": false,
+    "p0_recorded": false,
+    "safe_for_db_push": false
+  },
+  "recommended_history_target_before_p0_push": {
+    "remote_versions": [
+      "20260817175921",
+      "20260817175945",
+      "20260817175955",
+      "20260817181420",
+      "20260817181445",
+      "20260817181504",
+      "20260818131542",
+      "20260818132659",
+      "20260821090000"
+    ],
+    "local_only_version": "20260821100000",
+    "strategy": "Preserve all eight production history rows, add matching local no-op anchors, archive legacy 001-010 unchanged, and mark only the canonical baseline version applied.",
+    "scratch_simulation": "PASS: all ten versions aligned and db push --dry-run returned up to date; simulated anchor rows were then reverted."
+  },
+  "backup_status": {
+    "backups": null,
+    "pitr_enabled": false,
+    "walg_enabled": true,
+    "region": "ap-south-1",
+    "ready": false
+  },
+  "repository_direct_write_scan": {
+    "direct_sales_write": false,
+    "direct_sale_items_write": false,
+    "direct_mutation_idempotency_write": false,
+    "sales_flow": "complete_sale RPC only",
+    "product_mutation_flow": "process_product_mutation RPC plus existing admin-only direct products insert",
+    "external_integrations_verified": false
+  },
+  "offline_queue": {
+    "cashier_product_forbidden_immediate_dead_letter": true,
+    "soft_deleted_product_sale_immediate_dead_letter": true,
+    "sale_queue_user_scoped": false,
+    "sale_queue_tenant_scoped": false,
+    "sale_queue_cleared_on_logout": false,
+    "ready": false
+  },
+  "tests": {
+    "flutter_all": {
+      "passed": 60,
+      "skipped": 3,
+      "failed": 0
+    },
+    "p0_scratch_database_checkpoint": "PASS",
+    "queue_targeted": "PASS",
+    "flutter_analyze": {
+      "errors": 0,
+      "warnings": 2,
+      "infos": 3
+    }
+  },
+  "blockers": [
+    "Production migration history is not reconciled and db push would not propose only P0.",
+    "No available production backup was returned and PITR is disabled.",
+    "Offline sale queue entries do not carry user_id or isletme_id and are not cleared on logout.",
+    "No scratch-validated inverse authorization migration exists for post-apply rollback.",
+    "External integrations that may write financial/internal tables require owner sign-off.",
+    "Three Supabase-dependent widget tests remain skipped, so app routing smoke coverage is incomplete."
+  ]
+}
