@@ -28,7 +28,9 @@ class MutationSyncEngine {
   bool _isSyncing = false;
 
   /// Bekleyen mutasyonları gönderir.
-  Future<void> syncPendingMutations(int currentIsletmeId, {Future<dynamic> Function(String, Map<String, dynamic>)? rpcCaller}) async {
+  Future<void> syncPendingMutations(int currentIsletmeId,
+      {Future<dynamic> Function(String, Map<String, dynamic>)?
+          rpcCaller}) async {
     if (_isSyncing) {
       developer.log('Senkronizasyon zaten çalışıyor.', name: _logTag);
       return;
@@ -42,7 +44,9 @@ class MutationSyncEngine {
       }
     } catch (e) {
       // Test ortamında MissingPluginException vb. atılabilir
-      developer.log('Connectivity kontrolü yapılamadı (Test ortamı olabilir): $e', name: _logTag);
+      developer.log(
+          'Connectivity kontrolü yapılamadı (Test ortamı olabilir): $e',
+          name: _logTag);
     }
 
     if (!hasInternet) {
@@ -86,8 +90,9 @@ class MutationSyncEngine {
         }
 
         try {
-          final payloadJson = payloadStr != null ? jsonDecode(payloadStr) : null;
-          
+          final payloadJson =
+              payloadStr != null ? jsonDecode(payloadStr) : null;
+
           final params = {
             'p_idempotency_key': idempotencyKey,
             'p_isletme_id': isletmeId,
@@ -96,17 +101,18 @@ class MutationSyncEngine {
             'p_payload': payloadJson,
             'p_base_updated_at': baseUpdatedAtStr,
           };
-          
+
           if (rpcCaller != null) {
             await rpcCaller('process_product_mutation', params);
           } else {
-            await Supabase.instance.client.rpc('process_product_mutation', params: params);
+            await Supabase.instance.client
+                .rpc('process_product_mutation', params: params);
           }
 
           // Başarılı
           await dao.updateStatus(id, 'SYNCED');
-          developer.log('Mutasyon başarılı: id=$id, type=$operationType', name: _logTag);
-          
+          developer.log('Mutasyon başarılı: id=$id, type=$operationType',
+              name: _logTag);
         } on PostgrestException catch (e) {
           final String msg = e.message;
 
@@ -116,16 +122,21 @@ class MutationSyncEngine {
           } else if (_isPermanentError(msg)) {
             // Yetki, Çakışma (CONFLICT), Validasyon -> DEAD_LETTER
             await dao.updateStatus(id, 'DEAD_LETTER', lastError: msg);
-            developer.log('Kalıcı hata (DEAD_LETTER): id=$id, hata=$msg', name: _logTag, level: 900);
+            developer.log('Kalıcı hata (DEAD_LETTER): id=$id, hata=$msg',
+                name: _logTag, level: 900);
           } else {
             // Geçici hata -> Retry
             final int nextRetry = currentRetries + 1;
             if (nextRetry >= _maxRetries) {
-              await dao.updateStatus(id, 'DEAD_LETTER', lastError: 'Max retries exceeded: $msg');
-              developer.log('Max retry aşıldı (DEAD_LETTER): id=$id, hata=$msg', name: _logTag, level: 900);
+              await dao.updateStatus(id, 'DEAD_LETTER',
+                  lastError: 'Max retries exceeded: $msg');
+              developer.log('Max retry aşıldı (DEAD_LETTER): id=$id, hata=$msg',
+                  name: _logTag, level: 900);
             } else {
-              await dao.updateStatus(id, 'PENDING', lastError: msg, retryCount: nextRetry);
-              developer.log('Geçici hata (Retry $nextRetry): id=$id, hata=$msg', name: _logTag, level: 800);
+              await dao.updateStatus(id, 'PENDING',
+                  lastError: msg, retryCount: nextRetry);
+              developer.log('Geçici hata (Retry $nextRetry): id=$id, hata=$msg',
+                  name: _logTag, level: 800);
               // FIFO kuralları gereği, biri geçici hataya düşerse diğerlerine devam edemeyiz (çünkü sıralama önemli olabilir)
               // Bu yüzden break yapıp mevcut döngüyü kırıyoruz ki, sonraki sync tekrar başa dönsün.
               break;
@@ -135,11 +146,15 @@ class MutationSyncEngine {
           // Network veya diğer hatalar -> Retry
           final int nextRetry = currentRetries + 1;
           if (nextRetry >= _maxRetries) {
-            await dao.updateStatus(id, 'DEAD_LETTER', lastError: 'Max retries exceeded: $e');
-            developer.log('Max retry aşıldı (DEAD_LETTER): id=$id, hata=$e', name: _logTag, level: 900);
+            await dao.updateStatus(id, 'DEAD_LETTER',
+                lastError: 'Max retries exceeded: $e');
+            developer.log('Max retry aşıldı (DEAD_LETTER): id=$id, hata=$e',
+                name: _logTag, level: 900);
           } else {
-            await dao.updateStatus(id, 'PENDING', lastError: e.toString(), retryCount: nextRetry);
-            developer.log('Ağ hatası (Retry $nextRetry): id=$id, hata=$e', name: _logTag, level: 800);
+            await dao.updateStatus(id, 'PENDING',
+                lastError: e.toString(), retryCount: nextRetry);
+            developer.log('Ağ hatası (Retry $nextRetry): id=$id, hata=$e',
+                name: _logTag, level: 800);
             break; // FIFO kuralı gereği döngüyü kır
           }
         }
@@ -150,7 +165,9 @@ class MutationSyncEngine {
   }
 
   bool _isPermanentError(String message) {
-    return message.contains('CONFLICT_DETECTED') ||
+    return message.contains('AUTH_REQUIRED') ||
+        message.contains('PRODUCT_MUTATION_FORBIDDEN') ||
+        message.contains('CONFLICT_DETECTED') ||
         message.contains('TENANT_MISMATCH') ||
         message.contains('INVALID_OPERATION_TYPE') ||
         message.contains('permission denied') ||

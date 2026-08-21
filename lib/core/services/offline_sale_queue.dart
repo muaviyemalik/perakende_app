@@ -115,7 +115,10 @@ class OfflineSaleQueue {
   ///
   /// Eşzamanlılık koruması: Aynı anda yalnızca bir sync çalışır.
   /// Geri dönüş: Başarıyla gönderilen satış sayısı.
-  Future<int> syncAll() async {
+  Future<int> syncAll({
+    Future<List<ConnectivityResult>> Function()? connectivityChecker,
+    Future<dynamic> Function(String, Map<String, dynamic>)? rpcCaller,
+  }) async {
     // Eşzamanlılık kilidi
     if (_isSyncing) {
       developer.log(
@@ -126,7 +129,9 @@ class OfflineSaleQueue {
     }
 
     // İnternet kontrolü
-    final connectivityResult = await Connectivity().checkConnectivity();
+    final connectivityResult = connectivityChecker == null
+        ? await Connectivity().checkConnectivity()
+        : await connectivityChecker();
     if (connectivityResult.contains(ConnectivityResult.none)) {
       developer.log(
         'internet yok — sync atlanıyor',
@@ -149,17 +154,21 @@ class OfflineSaleQueue {
         name: _logTag,
       );
 
-      final client = Supabase.instance.client;
       final List<QueuedSale> remaining = [];
       final List<QueuedSale> deadLetters = [];
       int successCount = 0;
 
       for (final sale in queue) {
         try {
-          await client.rpc('complete_sale', params: {
+          final params = {
             'p_items': sale.items,
             'p_idempotency_key': sale.idempotencyKey,
-          });
+          };
+          if (rpcCaller == null) {
+            await Supabase.instance.client.rpc('complete_sale', params: params);
+          } else {
+            await rpcCaller('complete_sale', params);
+          }
 
           successCount++;
           developer.log(
@@ -269,8 +278,8 @@ class OfflineSaleQueue {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getStringList(_deadLetterKey) ?? [];
     return raw
-        .map((json) => QueuedSale.fromJson(
-            jsonDecode(json) as Map<String, dynamic>))
+        .map((json) =>
+            QueuedSale.fromJson(jsonDecode(json) as Map<String, dynamic>))
         .toList();
   }
 
@@ -292,8 +301,8 @@ class OfflineSaleQueue {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getStringList(_pendingKey) ?? [];
     return raw
-        .map((json) => QueuedSale.fromJson(
-            jsonDecode(json) as Map<String, dynamic>))
+        .map((json) =>
+            QueuedSale.fromJson(jsonDecode(json) as Map<String, dynamic>))
         .toList();
   }
 
