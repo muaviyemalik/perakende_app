@@ -1,0 +1,167 @@
+{
+  "format_version": 1,
+  "status": "PASS",
+  "verified_at": "2026-08-21",
+  "projects": {
+    "scratch": "sostibxqqvqulmyejymv",
+    "production": "vnvifxvtutlbivsegjtp"
+  },
+  "safety": {
+    "production_write_performed": false,
+    "production_link_changed": false,
+    "production_queries": "SELECT/WITH only through the Supabase Management API database query endpoint",
+    "scratch_write_performed": true,
+    "scratch_applied_migrations": [
+      "20260821090000_canonical_live_baseline.sql"
+    ],
+    "legacy_001_010_applied_to_scratch": false,
+    "history_repair_performed": false,
+    "p0_authorization_migration_created": false
+  },
+  "baseline": {
+    "file": "supabase/migrations/20260821090000_canonical_live_baseline.sql",
+    "sha256": "5d629f32110ffa2c634df3a9b637e3f7fa842188ca3a7e4f8df07cc498ea04dc",
+    "postgres_execution": "PASS",
+    "scratch_history_after_apply": [
+      "20260821090000"
+    ],
+    "post_apply_dry_run": "up-to-date; no pending migrations",
+    "execution_fixes_found_by_scratch": [
+      {
+        "issue": "sale_items_sale_id_fkey was declared before sales_pkey",
+        "resolution": "Moved sales_pkey before the dependent foreign key without changing final schema semantics."
+      },
+      {
+        "issue": "Ten pg_get_functiondef-derived CREATE FUNCTION statements lacked a trailing statement terminator",
+        "resolution": "Added the required semicolon after each closing $function$ delimiter without changing function bodies."
+      }
+    ]
+  },
+  "object_counts": {
+    "scratch_equals_production": true,
+    "tables": 6,
+    "columns": 32,
+    "constraints": 18,
+    "indexes": 20,
+    "functions": 10,
+    "triggers": 5,
+    "rls_enabled_tables": 6,
+    "force_rls_tables": 0,
+    "policies": 19,
+    "publications": 2,
+    "sequences": 1,
+    "schema_acl": 2,
+    "sequence_grants": 9,
+    "table_grants": 91,
+    "routine_grants": 11
+  },
+  "strict_fingerprints": {
+    "columns": {
+      "scratch": "c09e8e4791b750289dd25bef3cc4242f",
+      "production": "c09e8e4791b750289dd25bef3cc4242f"
+    },
+    "constraints": {
+      "scratch": "c21312b4ca454aa0a9874b05bed0ef70",
+      "production": "c21312b4ca454aa0a9874b05bed0ef70"
+    },
+    "functions": {
+      "scratch": "11d7ee4f08aad7058840ce08536d5acd",
+      "production": "9d53cf33a9a0ce6fddfdb9f74c97fd96"
+    },
+    "indexes": {
+      "scratch": "36b2361a6226058622e60a7ac9fdd8c0",
+      "production": "36b2361a6226058622e60a7ac9fdd8c0"
+    },
+    "policies": {
+      "scratch": "37c9925e1deed1ba41bf31a1582d3b72",
+      "production": "37c9925e1deed1ba41bf31a1582d3b72"
+    },
+    "publications": {
+      "scratch": "e825329024efd25013199cbfae028739",
+      "production": "e825329024efd25013199cbfae028739"
+    },
+    "routine_grants": {
+      "scratch": "ef152fef42f94fd84a769dc77c203907",
+      "production": "e867b7e410046f9dc5200bdde7b59e01"
+    },
+    "schema_acl": {
+      "scratch": "86a611d36f5a92d3be3f4afae899b38f",
+      "production": "edf22bec68f79a8298f04b62cb382144"
+    },
+    "sequence_grants": {
+      "scratch": "7c3cd5c9420d458464060fa99f7988d6",
+      "production": "7c3cd5c9420d458464060fa99f7988d6"
+    },
+    "sequences": {
+      "scratch": "f0abdcf5ccb971c0bbebec61c5ad8a6f",
+      "production": "f0abdcf5ccb971c0bbebec61c5ad8a6f"
+    },
+    "table_grants": {
+      "scratch": "be3c368bed36c5b8fd041963ba6a8060",
+      "production": "be3c368bed36c5b8fd041963ba6a8060"
+    },
+    "triggers": {
+      "scratch": "77e5760916f95fe4b289dc09d22c9900",
+      "production": "77e5760916f95fe4b289dc09d22c9900"
+    }
+  },
+  "strict_comparison": {
+    "matching_categories": 9,
+    "differing_categories": [
+      "functions",
+      "routine_grants",
+      "schema_acl"
+    ],
+    "production_matches_object_manifest": true
+  },
+  "false_positives": [
+    {
+      "category": "functions",
+      "cause": "Production stores CRLF in three public PL/pgSQL bodies while scratch stores LF.",
+      "objects": {
+        "public.complete_sale(p_items jsonb, p_idempotency_key text)": {
+          "production_crlf_count": 258,
+          "scratch_crlf_count": 0,
+          "normalized_body_hash": "cd4c22d8e0f5f724c2eb16da89e67938"
+        },
+        "public.fn_set_updated_at()": {
+          "production_crlf_count": 5,
+          "scratch_crlf_count": 0,
+          "normalized_body_hash": "ef6b2d76360a727c9d6479352655b7ba"
+        },
+        "public.process_product_mutation(p_idempotency_key uuid, p_isletme_id integer, p_operation_type text, p_product_id uuid, p_payload jsonb, p_base_updated_at timestamp with time zone)": {
+          "production_crlf_count": 152,
+          "scratch_crlf_count": 0,
+          "normalized_body_hash": "fd9738d1b2f1bec106d46725c457e710"
+        }
+      },
+      "proof": "All ten function structural hashes, normalized ACLs, and CRLF/LF-normalized DDL/body hashes match. The other seven functions also match strictly."
+    },
+    {
+      "category": "routine_grants",
+      "cause": "verify_live_schema.sql uses information_schema.specific_name, whose suffix contains a database-local function OID.",
+      "examples": [
+        "scratch complete_sale_17800 vs production complete_sale_18206",
+        "scratch fn_set_updated_at_17802 vs production fn_set_updated_at_18276"
+      ],
+      "proof": "All 11 grants match by stable schema/name/identity-arguments/grantee/privilege/is_grantable identity."
+    },
+    {
+      "category": "schema_acl",
+      "cause": "private.nspacl is NULL in production (default owner privileges) and explicitly {postgres=UC/postgres} in scratch after baseline REVOKE statements.",
+      "proof": "Normalized effective ACL, owner, and anon/authenticated/service_role USAGE checks match for both public and private schemas."
+    }
+  ],
+  "semantic_comparison": {
+    "tables_columns_constraints_indexes": "PASS",
+    "functions_owner_security_definer_search_path_body": "PASS",
+    "triggers": "PASS",
+    "rls": "PASS",
+    "policies": "PASS",
+    "table_sequence_routine_grants": "PASS",
+    "sequences": "PASS",
+    "realtime_publication_membership": "PASS",
+    "scratch_schema_equals_current_production_schema": "PASS",
+    "real_schema_drift": []
+  }
+}
