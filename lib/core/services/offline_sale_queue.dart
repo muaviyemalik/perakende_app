@@ -35,6 +35,18 @@ const _logTag = 'OFFLINE_QUEUE';
 const _pendingKey = 'offline_sale_queue';
 const _deadLetterKey = 'offline_sale_dead_letters';
 const _maxRetries = 3;
+const _scopeVersion = 1;
+const _missingScopeError = 'OFFLINE_QUEUE_QUARANTINED:SCOPE_MISSING';
+
+/// Verified authenticated identity that owns an offline sale.
+class OfflineSaleScope {
+  const OfflineSaleScope({required this.userId, required this.isletmeId});
+
+  final String userId;
+  final int isletmeId;
+
+  bool get isValid => userId.trim().isNotEmpty && isletmeId > 0;
+}
 
 /// Kuyruğa alınan tek bir satış kaydı.
 class QueuedSale {
@@ -42,6 +54,8 @@ class QueuedSale {
     required this.idempotencyKey,
     required this.items,
     required this.createdAt,
+    this.userId,
+    this.isletmeId,
     this.retryCount = 0,
     this.lastError,
   });
@@ -49,6 +63,8 @@ class QueuedSale {
   final String idempotencyKey;
   final List<Map<String, dynamic>> items;
   final String createdAt;
+  final String? userId;
+  final int? isletmeId;
   int retryCount;
   String? lastError;
 
@@ -56,21 +72,41 @@ class QueuedSale {
         'idempotency_key': idempotencyKey,
         'items': items,
         'created_at': createdAt,
+        'scope_version': _scopeVersion,
+        'user_id': userId,
+        'isletme_id': isletmeId,
         'retry_count': retryCount,
         'last_error': lastError,
       };
 
   factory QueuedSale.fromJson(Map<String, dynamic> json) {
+    final rawUserId = json['user_id'];
+    final rawIsletmeId = json['isletme_id'];
+    final parsedIsletmeId = rawIsletmeId is int
+        ? rawIsletmeId
+        : rawIsletmeId is num
+            ? rawIsletmeId.toInt()
+            : int.tryParse(rawIsletmeId?.toString() ?? '');
+
     return QueuedSale(
       idempotencyKey: json['idempotency_key'] as String,
       items: (json['items'] as List<dynamic>)
           .map((e) => Map<String, dynamic>.from(e as Map))
           .toList(),
       createdAt: json['created_at'] as String,
+      userId:
+          rawUserId is String && rawUserId.trim().isNotEmpty ? rawUserId : null,
+      isletmeId: parsedIsletmeId,
       retryCount: (json['retry_count'] as int?) ?? 0,
       lastError: json['last_error'] as String?,
     );
   }
+
+  bool get hasValidScope =>
+      userId != null && userId!.trim().isNotEmpty && (isletmeId ?? 0) > 0;
+
+  bool belongsTo(OfflineSaleScope scope) =>
+      hasValidScope && userId == scope.userId && isletmeId == scope.isletmeId;
 }
 
 class OfflineSaleQueue {
@@ -88,16 +124,24 @@ class OfflineSaleQueue {
   /// Online satışlar için de kullanılır — her satışın benzersiz kimliği olur.
   String generateKey() => _uuid.v4();
 
-  /// Satışı kuyruğa ekler. Sepetteki ürünlerden yalnızca product_id ve
-  /// quantity saklanır — fiyat ve tenant bilgisi DB tarafında belirlenir.
+  /// Satışı kuyruğa ekler. Ürünlerden yalnızca product_id ve quantity;
+  /// sahiplik doğrulaması için de verified user_id/isletme_id saklanır.
+  /// Fiyat ve satış satırlarındaki authoritative tenant DB tarafında belirlenir.
   Future<void> enqueue({
     required String idempotencyKey,
     required List<Map<String, dynamic>> items,
+    required OfflineSaleScope scope,
   }) async {
+    if (!scope.isValid) {
+      throw StateError('Offline sale scope could not be verified.');
+    }
+
     final sale = QueuedSale(
       idempotencyKey: idempotencyKey,
       items: items,
       createdAt: DateTime.now().toIso8601String(),
+      userId: scope.userId,
+      isletmeId: scope.isletmeId,
     );
 
     final queue = await _loadQueue();
@@ -116,6 +160,7 @@ class OfflineSaleQueue {
   /// Eşzamanlılık koruması: Aynı anda yalnızca bir sync çalışır.
   /// Geri dönüş: Başarıyla gönderilen satış sayısı.
   Future<int> syncAll({
+    required OfflineSaleScope? currentScope,
     Future<List<ConnectivityResult>> Function()? connectivityChecker,
     Future<dynamic> Function(String, Map<String, dynamic>)? rpcCaller,
   }) async {
@@ -128,24 +173,46 @@ class OfflineSaleQueue {
       return 0;
     }
 
-    // İnternet kontrolü
-    final connectivityResult = connectivityChecker == null
-        ? await Connectivity().checkConnectivity()
-        : await connectivityChecker();
-    if (connectivityResult.contains(ConnectivityResult.none)) {
-      developer.log(
-        'internet yok — sync atlanıyor',
-        name: _logTag,
-      );
-      return 0;
-    }
-
     _isSyncing = true;
 
     try {
-      final queue = await _loadQueue();
+      var queue = await _loadQueue();
       if (queue.isEmpty) {
         developer.log('kuyruk boş — sync yapılacak bir şey yok', name: _logTag);
+        return 0;
+      }
+
+      // Legacy records have no trustworthy owner. Never let them inherit the
+      // next account's session: quarantine them before any RPC is attempted.
+      final unscoped = queue.where((sale) => !sale.hasValidScope).toList();
+      if (unscoped.isNotEmpty) {
+        for (final sale in unscoped) {
+          sale.lastError = _missingScopeError;
+        }
+        queue = queue.where((sale) => sale.hasValidScope).toList();
+        await _saveQueue(queue);
+        await _appendDeadLetters(unscoped);
+      }
+
+      // Auth/session or tenant lookup failure is fail-closed.
+      if (currentScope == null || !currentScope.isValid) {
+        developer.log(
+          'oturum kapsamı doğrulanamadı — sync reddedildi',
+          name: _logTag,
+          level: 900,
+        );
+        return 0;
+      }
+
+      // İnternet kontrolü only after local legacy quarantine.
+      final connectivityResult = connectivityChecker == null
+          ? await Connectivity().checkConnectivity()
+          : await connectivityChecker();
+      if (connectivityResult.contains(ConnectivityResult.none)) {
+        developer.log(
+          'internet yok — sync atlanıyor',
+          name: _logTag,
+        );
         return 0;
       }
 
@@ -159,6 +226,12 @@ class OfflineSaleQueue {
       int successCount = 0;
 
       for (final sale in queue) {
+        if (!sale.belongsTo(currentScope)) {
+          // Preserve it for its original owner without incrementing retries.
+          remaining.add(sale);
+          continue;
+        }
+
         try {
           final params = {
             'p_items': sale.items,

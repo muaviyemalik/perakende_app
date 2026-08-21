@@ -3,8 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/services/offline_sale_queue.dart';
+import '../core/providers/tenant_provider.dart';
 import 'dashboard_stats_provider.dart';
-
 
 // =============================================================================
 // CartItem Model
@@ -60,7 +60,9 @@ class CartNotifier extends Notifier<List<CartItem>> {
       bool hasInternet = !results.contains(ConnectivityResult.none);
 
       if (hasInternet) {
-        final synced = await _queue.syncAll();
+        final synced = await _queue.syncAll(
+          currentScope: await _currentSaleScope(),
+        );
         if (synced > 0) {
           ref.invalidate(dashboardStatsProvider);
         }
@@ -87,7 +89,7 @@ class CartNotifier extends Notifier<List<CartItem>> {
     if (existingIndex != -1) {
       final existingItem = state[existingIndex];
       final newQuantity = existingItem.quantity + quantity;
-      
+
       if (newQuantity > stock) {
         return 'Stokta yalnızca $stock adet bulunuyor.';
       }
@@ -119,7 +121,7 @@ class CartNotifier extends Notifier<List<CartItem>> {
 
   String? updateQuantity(String productId, {required int delta}) {
     String? errorMessage;
-    
+
     final updatedItems = state
         .map((item) {
           if (item.product_id != productId) {
@@ -130,7 +132,7 @@ class CartNotifier extends Notifier<List<CartItem>> {
           if (nextQuantity <= 0) {
             return null;
           }
-          
+
           if (nextQuantity > item.stock) {
             errorMessage = 'Stokta yalnızca ${item.stock} adet bulunuyor.';
             return item; // Değişiklik yapma, eski item'ı dön
@@ -144,7 +146,7 @@ class CartNotifier extends Notifier<List<CartItem>> {
     if (errorMessage == null) {
       state = updatedItems;
     }
-    
+
     return errorMessage;
   }
 
@@ -178,6 +180,12 @@ class CartNotifier extends Notifier<List<CartItem>> {
     final userId = client.auth.currentUser?.id;
     if (userId == null) return 'Kullanıcı girişi bulunamadı!';
 
+    final scope = await _currentSaleScope();
+    if (scope == null || scope.userId != userId) {
+      return 'Oturum veya işletme bilgisi doğrulanamadı. '
+          'Lütfen tekrar giriş yapın.';
+    }
+
     // Sepet verilerini RPC formatına çevir — sadece product_id ve quantity.
     // Fiyat, tenant, kullanıcı bilgileri sunucudan alınır.
     final items = state
@@ -193,11 +201,13 @@ class CartNotifier extends Notifier<List<CartItem>> {
 
     if (isOffline) {
       // Çevrimdışı mod: OfflineSaleQueue'ya ekle
-      // Güvenlik notu: Supabase'e gönderildiğinde RLS + trigger doğrulayacak.
-      // isletme_id, created_by ve fiyat bilgileri DB tarafında belirlenecek.
+      // Güvenlik notu: Queue owner scope'u replay öncesi aktif oturumla
+      // eşleşmelidir. Satışın authoritative isletme_id, created_by ve fiyat
+      // bilgileri yine DB tarafında belirlenir.
       await _queue.enqueue(
         idempotencyKey: _queue.generateKey(),
         items: items,
+        scope: scope,
       );
       clearCart();
       return 'İnternet bağlantısı yok. Satış telefona kaydedildi, '
@@ -205,7 +215,7 @@ class CartNotifier extends Notifier<List<CartItem>> {
     }
 
     // Çevrimiçi mod: Önce bekleyen çevrimdışı satışları senkronize et
-    final synced = await _queue.syncAll();
+    final synced = await _queue.syncAll(currentScope: scope);
     if (synced > 0) {
       ref.invalidate(dashboardStatsProvider);
     }
@@ -267,6 +277,19 @@ class CartNotifier extends Notifier<List<CartItem>> {
       return 'Satış sırasında hata oluştu: ${e.message}';
     } catch (e) {
       return 'Satış sırasında hata oluştu: $e';
+    }
+  }
+
+  Future<OfflineSaleScope?> _currentSaleScope() async {
+    final userId = Supabase.instance.client.auth.currentUser?.id;
+    if (userId == null || userId.trim().isEmpty) return null;
+
+    try {
+      final isletmeId = await ref.read(currentIsletmeIdProvider.future);
+      if (isletmeId == null || isletmeId <= 0) return null;
+      return OfflineSaleScope(userId: userId, isletmeId: isletmeId);
+    } catch (_) {
+      return null;
     }
   }
 
