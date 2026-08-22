@@ -31,6 +31,8 @@ The three raw fingerprint differences are proven catalog/format artifacts: CRLF 
 
 Run only after the scratch result is fully matching, a production backup/PITR checkpoint exists, and an approved maintenance window begins:
 
+Repository preparation steps 3–5 were completed on branch `p0-authorization-hardening` without any production write. Reverify the active set and frozen hashes before continuing; do not repeat the moves blindly.
+
 1. Capture current history: run `verify_migration_history.sql` and retain `remote_history_snapshot.json`.
 2. Confirm live schema fingerprint still matches `object_manifest.json`.
 3. Move legacy local `001–010` into the forensic archive without changing contents.
@@ -46,7 +48,7 @@ Run only after the scratch result is fully matching, a production backup/PITR ch
 
    ```powershell
    .\node_modules\.bin\supabase.cmd migration list --linked
-   .\node_modules\.bin\supabase.cmd db push --linked --dry-run
+   .\node_modules\.bin\supabase.cmd db push --linked --dry-run --skip-vault
    ```
 
 8. Before deploying P0, the list must show the eight anchors and baseline on both LOCAL and REMOTE, with only `20260821100000` local-only. The dry run must propose exactly that one P0 migration and no legacy/baseline SQL. If anything else appears, stop and revert the baseline history marker.

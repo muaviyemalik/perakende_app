@@ -221,7 +221,7 @@ const legacyHashes = {
 const legacyResults = Object.fromEntries(
   Object.entries(legacyHashes).map(([file, expectedHash]) => {
     const actualHash = sha256(
-      readUtf8(resolve(root, "supabase/migrations", file)),
+      readUtf8(resolve(root, "supabase/migration_archive", file)),
     );
     return [file, { expected: expectedHash, actual: actualHash, matches: actualHash === expectedHash }];
   }),

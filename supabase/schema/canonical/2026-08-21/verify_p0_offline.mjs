@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "../../../..");
 const migrationsDir = resolve(root, "supabase/migrations");
+const migrationArchiveDir = resolve(root, "supabase/migration_archive");
 const canonicalDir = resolve(root, "supabase/schema/canonical/2026-08-21");
 
 const decoder = new TextDecoder("utf-8", { fatal: true });
@@ -66,7 +67,10 @@ const checkpointHashes = {
 
 const checkpointResults = Object.fromEntries(
   Object.entries(checkpointHashes).map(([file, expected]) => {
-    const actual = sha256(readUtf8(resolve(migrationsDir, file)));
+    const directory = file.startsWith("202608")
+      ? migrationsDir
+      : migrationArchiveDir;
+    const actual = sha256(readUtf8(resolve(directory, file)));
     return [file, { expected, actual, matches: expected === actual }];
   }),
 );
