@@ -30,7 +30,7 @@ void main() {
     db = await LocalDatabase.instance.database;
     await db.delete('local_products');
     await db.delete('offline_product_mutations');
-    
+
     mutationDao = OfflineMutationDao.instance;
   });
 
@@ -42,7 +42,9 @@ void main() {
     }
   });
 
-  test('MutationSyncEngine - Başarılı işlem sonrası mutation SYNCED durumuna geçer', () async {
+  test(
+      'MutationSyncEngine - Başarılı işlem sonrası mutation SYNCED durumuna geçer',
+      () async {
     await LocalProductDao.instance.createLocal(
       isletmeId: isletmeId,
       name: 'Urun',
@@ -54,13 +56,16 @@ void main() {
       return {'status': 'SUCCESS'};
     }
 
-    await MutationSyncEngine.instance.syncPendingMutations(isletmeId, rpcCaller: mockRpc);
+    await MutationSyncEngine.instance
+        .syncPendingMutations(isletmeId, rpcCaller: mockRpc);
 
     final pending = await mutationDao.getPendingMutations(isletmeId);
     expect(pending, isEmpty);
   });
 
-  test('MutationSyncEngine - FIFO sırasına uyar, geçici hata durumunda retry count artar ve sıradaki işlemlere geçmez', () async {
+  test(
+      'MutationSyncEngine - FIFO sırasına uyar, geçici hata durumunda retry count artar ve sıradaki işlemlere geçmez',
+      () async {
     await LocalProductDao.instance.createLocal(
       isletmeId: isletmeId,
       name: 'Urun 1',
@@ -80,7 +85,8 @@ void main() {
       throw const PostgrestException(message: 'timeout');
     }
 
-    await MutationSyncEngine.instance.syncPendingMutations(isletmeId, rpcCaller: mockRpc);
+    await MutationSyncEngine.instance
+        .syncPendingMutations(isletmeId, rpcCaller: mockRpc);
 
     expect(rpcCallCount, 1);
 
@@ -90,7 +96,8 @@ void main() {
     expect(pending[1]['retry_count'], 0);
   });
 
-  test('MutationSyncEngine - 3 başarısız denemeden sonra DEAD_LETTER olur', () async {
+  test('MutationSyncEngine - 3 başarısız denemeden sonra DEAD_LETTER olur',
+      () async {
     await LocalProductDao.instance.createLocal(
       isletmeId: isletmeId,
       name: 'Urun 1',
@@ -103,18 +110,21 @@ void main() {
     }
 
     // 1. deneme
-    await MutationSyncEngine.instance.syncPendingMutations(isletmeId, rpcCaller: mockRpc);
+    await MutationSyncEngine.instance
+        .syncPendingMutations(isletmeId, rpcCaller: mockRpc);
     var pending = await mutationDao.getPendingMutations(isletmeId);
     expect(pending[0]['retry_count'], 1);
 
     // 2. deneme
-    await MutationSyncEngine.instance.syncPendingMutations(isletmeId, rpcCaller: mockRpc);
+    await MutationSyncEngine.instance
+        .syncPendingMutations(isletmeId, rpcCaller: mockRpc);
     pending = await mutationDao.getPendingMutations(isletmeId);
     expect(pending[0]['retry_count'], 2);
 
     // 3. deneme (Max sınır) -> DEAD_LETTER
-    await MutationSyncEngine.instance.syncPendingMutations(isletmeId, rpcCaller: mockRpc);
-    
+    await MutationSyncEngine.instance
+        .syncPendingMutations(isletmeId, rpcCaller: mockRpc);
+
     pending = await mutationDao.getPendingMutations(isletmeId);
     expect(pending, isEmpty);
 
@@ -124,7 +134,9 @@ void main() {
     expect(rows.first['last_error'], contains('Max retries exceeded'));
   });
 
-  test('MutationSyncEngine - Kalıcı hatalarda (CONFLICT vb) anında DEAD_LETTER olur', () async {
+  test(
+      'MutationSyncEngine - Kalıcı hatalarda (CONFLICT vb) anında DEAD_LETTER olur',
+      () async {
     await LocalProductDao.instance.createLocal(
       isletmeId: isletmeId,
       name: 'Urun 1',
@@ -136,7 +148,8 @@ void main() {
       throw const PostgrestException(message: 'CONFLICT_DETECTED');
     }
 
-    await MutationSyncEngine.instance.syncPendingMutations(isletmeId, rpcCaller: mockRpc);
+    await MutationSyncEngine.instance
+        .syncPendingMutations(isletmeId, rpcCaller: mockRpc);
 
     final pending = await mutationDao.getPendingMutations(isletmeId);
     expect(pending, isEmpty);
@@ -145,8 +158,39 @@ void main() {
     expect(rows.first['status'], 'DEAD_LETTER');
     expect(rows.first['last_error'], contains('CONFLICT_DETECTED'));
   });
-  
-  test('MutationSyncEngine - Idempotency tekrarında SYNCED olarak işaretlenir', () async {
+
+  test(
+      'MutationSyncEngine - Kasiyer product mutation yetki hatası anında DEAD_LETTER olur',
+      () async {
+    await LocalProductDao.instance.createLocal(
+      isletmeId: isletmeId,
+      name: 'Kasiyer Urunu',
+      price: 10,
+      stock: 5,
+    );
+
+    var rpcCallCount = 0;
+    Future<dynamic> mockRpc(String fn, Map<String, dynamic> params) async {
+      rpcCallCount++;
+      throw const PostgrestException(message: 'PRODUCT_MUTATION_FORBIDDEN');
+    }
+
+    await MutationSyncEngine.instance.syncPendingMutations(
+      isletmeId,
+      rpcCaller: mockRpc,
+    );
+
+    expect(rpcCallCount, 1);
+    expect(await mutationDao.getPendingMutations(isletmeId), isEmpty);
+
+    final rows = await db.query('offline_product_mutations');
+    expect(rows.single['status'], 'DEAD_LETTER');
+    expect(rows.single['retry_count'], 0);
+    expect(rows.single['last_error'], contains('PRODUCT_MUTATION_FORBIDDEN'));
+  });
+
+  test('MutationSyncEngine - Idempotency tekrarında SYNCED olarak işaretlenir',
+      () async {
     await LocalProductDao.instance.createLocal(
       isletmeId: isletmeId,
       name: 'Urun 1',
@@ -158,7 +202,8 @@ void main() {
       throw const PostgrestException(message: 'IDEMPOTENT_TEKRAR');
     }
 
-    await MutationSyncEngine.instance.syncPendingMutations(isletmeId, rpcCaller: mockRpc);
+    await MutationSyncEngine.instance
+        .syncPendingMutations(isletmeId, rpcCaller: mockRpc);
 
     final pending = await mutationDao.getPendingMutations(isletmeId);
     expect(pending, isEmpty);

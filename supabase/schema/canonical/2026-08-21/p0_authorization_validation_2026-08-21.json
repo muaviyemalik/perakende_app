@@ -1,0 +1,119 @@
+{
+  "format_version": 1,
+  "status": "READY_FOR_PRODUCTION_REVIEW",
+  "verified_at": "2026-08-21",
+  "projects": {
+    "scratch": "sostibxqqvqulmyejymv",
+    "production": "vnvifxvtutlbivsegjtp"
+  },
+  "checkpoint": {
+    "canonical_baseline_immutable": true,
+    "canonical_baseline_sha256": "5d629f32110ffa2c634df3a9b637e3f7fa842188ca3a7e4f8df07cc498ea04dc",
+    "legacy_001_010_hashes_unchanged": true
+  },
+  "safety": {
+    "production_write_performed": false,
+    "production_push_performed": false,
+    "production_history_mutation_performed": false,
+    "production_queries": "SELECT/WITH only",
+    "production_link_changed": false,
+    "scratch_write_performed": true
+  },
+  "production_preconditions_confirmed": [
+    "authenticated had INSERT/UPDATE/DELETE/TRUNCATE/REFERENCES/TRIGGER on sales and sale_items",
+    "authenticated had TRUNCATE on all six application tables",
+    "anon and authenticated had broad direct access to mutation_idempotency",
+    "product INSERT/UPDATE/DELETE policies were tenant-only and did not require admin role",
+    "process_product_mutation was invoker-security, had no fixed search_path, had no admin check, and was executable by PUBLIC/anon",
+    "complete_sale performed idempotency lookup before auth/tenant and did not exclude soft-deleted products",
+    "fn_set_updated_at was directly executable by PUBLIC/anon/authenticated/service_role"
+  ],
+  "migration": {
+    "file": "supabase/migrations/20260821100000_p0_authorization_hardening.sql",
+    "sha256": "1eefc022b6d0ad6a57cbc4af2fd7813a0eafd533e7455a358c0e3345fbcaadc5",
+    "forward_only": true,
+    "schema_shape_changes": false,
+    "changes": [
+      "Reduced authenticated table ACLs to application-required privileges and removed every client TRUNCATE path",
+      "Made sales and sale_items SELECT-only for authenticated clients and deny-only for direct RLS writes",
+      "Made mutation_idempotency internal to the hardened RPC",
+      "Made product write policies tenant-and-admin scoped while preserving tenant SELECT",
+      "Reordered complete_sale to auth -> tenant -> tenant-scoped idempotency -> sale and excluded deleted products",
+      "Converted process_product_mutation to SECURITY DEFINER with empty search_path and auth -> tenant -> admin -> idempotency ordering",
+      "Closed process_product_mutation EXECUTE to PUBLIC/anon and retained authenticated/service_role",
+      "Removed direct client EXECUTE from the trigger-only fn_set_updated_at function"
+    ]
+  },
+  "scratch_execution": {
+    "postgres_execution": "PASS",
+    "migration_history": [
+      "20260821090000",
+      "20260821100000"
+    ],
+    "post_apply_dry_run": "up-to-date; no pending migrations",
+    "legacy_001_010_applied": false
+  },
+  "tests": {
+    "offline_static_verifier": "PASS",
+    "catalog_postconditions": {
+      "status": "PASS",
+      "passed": 10,
+      "failed": 0
+    },
+    "transactional_authorization_suite": {
+      "file": "supabase/tests/database/01_p0_authorization.test.sql",
+      "sha256": "775c10f3d1834bcd6805640463e5a37f86d8201d5064c2221332441d459c0259",
+      "status": "PASS",
+      "result": "P0_AUTHORIZATION_TEST_PASS",
+      "fixture_rows_after_rollback": 0,
+      "verified_behaviors": [
+        "anon cannot execute either public mutation RPC",
+        "cashier cannot insert/update/delete products or use product mutation RPC",
+        "cashier cannot change own role",
+        "cashier cannot directly insert/update financial records",
+        "cross-tenant product reads and idempotency result disclosure are blocked",
+        "soft-deleted products cannot be sold",
+        "cashier complete_sale and same-tenant idempotent replay still work",
+        "admin direct product insert still works and tenant trigger overrides client tenant input",
+        "admin process_product_mutation CREATE still works",
+        "trigger-only fn_set_updated_at continues to run through product updates"
+      ]
+    },
+    "flutter_targeted_tests": {
+      "status": "BLOCKED_BY_TEST_HARNESS",
+      "commands": [
+        "flutter test test/cart_provider_test.dart test/core/services/mutation_sync_engine_test.dart",
+        "flutter test --no-pub --reporter expanded --timeout 30s test/core/services/mutation_sync_engine_test.dart"
+      ],
+      "observation": "Both runs produced no test output or CPU progress and were terminated; no Dart source was changed in this P0 draft."
+    }
+  },
+  "postcondition_invariants": {
+    "tables": 6,
+    "columns": 32,
+    "constraints": 18,
+    "indexes": 20,
+    "functions": 10,
+    "triggers": 5,
+    "policies": 19,
+    "rls_enabled_tables": 6,
+    "sequences": 1,
+    "realtime_memberships": 2
+  },
+  "real_schema_shape_drift": [],
+  "known_risks_before_production": [
+    "Any undocumented client or integration that writes sales, sale_items, or mutation_idempotency directly will break and must migrate to the RPC boundary.",
+    "Cashier-owned or cross-account offline product mutations will now be rejected; this is intentional but may expose the existing queue user/role-scoping debt.",
+    "Soft-deleted products in an offline sale queue will now move to the existing permanent-error/dead-letter path.",
+    "service_role still has EXECUTE grants, but both RPCs require a JWT-derived auth.uid; service jobs without user impersonation cannot use these RPCs.",
+    "The global products_barcode_key issue is unchanged because it is outside authorization P0 scope."
+  ],
+  "production_gate": [
+    "Complete and approve migration-history reconciliation first; do not push while production history and canonical baseline metadata are divergent.",
+    "Create a production backup/PITR checkpoint and approved maintenance window.",
+    "Rerun verify_p0_authorization_preconditions.sql immediately before deployment.",
+    "Inventory every non-Flutter integration for direct financial/idempotency writes.",
+    "Resolve or explicitly accept the Flutter test-harness blocker and run targeted client tests.",
+    "After deployment run verify_p0_authorization_postconditions.sql, the transactional authorization suite in a safe non-production clone, and admin/cashier smoke tests."
+  ]
+}

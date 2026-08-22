@@ -1,0 +1,271 @@
+{
+  "format_version": 1,
+  "source": {
+    "project_ref": "vnvifxvtutlbivsegjtp",
+    "captured_at": "2026-08-21",
+    "source_of_truth": "linked live Supabase catalog"
+  },
+  "baseline_migration": "20260821090000_canonical_live_baseline.sql",
+  "schema_only": true,
+  "p0_authorization_changes_included": false,
+  "counts": {
+    "tables": 6,
+    "columns": 32,
+    "constraints": 18,
+    "indexes": 20,
+    "functions": 10,
+    "triggers": 5,
+    "policies": 19,
+    "publications": 2,
+    "sequences": 1,
+    "schema_acl": 2,
+    "sequence_grants": 9,
+    "table_grants": 91,
+    "routine_grants": 11
+  },
+  "fingerprints": {
+    "columns": {
+      "count": 32,
+      "value": "c09e8e4791b750289dd25bef3cc4242f"
+    },
+    "constraints": {
+      "count": 18,
+      "value": "c21312b4ca454aa0a9874b05bed0ef70"
+    },
+    "functions": {
+      "count": 10,
+      "value": "9d53cf33a9a0ce6fddfdb9f74c97fd96"
+    },
+    "indexes": {
+      "count": 20,
+      "value": "36b2361a6226058622e60a7ac9fdd8c0"
+    },
+    "policies": {
+      "count": 19,
+      "value": "37c9925e1deed1ba41bf31a1582d3b72"
+    },
+    "publications": {
+      "count": 2,
+      "value": "e825329024efd25013199cbfae028739"
+    },
+    "routine_grants": {
+      "count": 11,
+      "value": "e867b7e410046f9dc5200bdde7b59e01"
+    },
+    "table_grants": {
+      "count": 91,
+      "value": "be3c368bed36c5b8fd041963ba6a8060"
+    },
+    "triggers": {
+      "count": 5,
+      "value": "77e5760916f95fe4b289dc09d22c9900"
+    },
+    "migration_history": {
+      "count": 8,
+      "value": "96b71f84b8e3aa76d388df7d3947a081"
+    },
+    "schema_acl": {
+      "count": 2,
+      "value": "edf22bec68f79a8298f04b62cb382144"
+    },
+    "sequence_grants": {
+      "count": 9,
+      "value": "7c3cd5c9420d458464060fa99f7988d6"
+    },
+    "sequences": {
+      "count": 1,
+      "value": "f0abdcf5ccb971c0bbebec61c5ad8a6f"
+    }
+  },
+  "objects": {
+    "tables": [
+      {
+        "schema": "public",
+        "name": "isletmeler",
+        "columns": [
+          "id",
+          "isletme_adi",
+          "olusturma_tarihi"
+        ],
+        "rls": true,
+        "force_rls": false
+      },
+      {
+        "schema": "public",
+        "name": "kullanicilar",
+        "columns": [
+          "id",
+          "isletme_id",
+          "rol",
+          "sifre_degisti_mi"
+        ],
+        "rls": true,
+        "force_rls": false
+      },
+      {
+        "schema": "public",
+        "name": "mutation_idempotency",
+        "columns": [
+          "idempotency_key",
+          "isletme_id",
+          "created_at"
+        ],
+        "rls": true,
+        "force_rls": false
+      },
+      {
+        "schema": "public",
+        "name": "products",
+        "columns": [
+          "id",
+          "barcode",
+          "name",
+          "price",
+          "stock",
+          "created_at",
+          "updated_at",
+          "isletme_id",
+          "deleted_at"
+        ],
+        "rls": true,
+        "force_rls": false
+      },
+      {
+        "schema": "public",
+        "name": "sale_items",
+        "columns": [
+          "id",
+          "sale_id",
+          "product_id",
+          "quantity",
+          "unit_price",
+          "created_at",
+          "isletme_id"
+        ],
+        "rls": true,
+        "force_rls": false
+      },
+      {
+        "schema": "public",
+        "name": "sales",
+        "columns": [
+          "id",
+          "total_amount",
+          "created_by",
+          "created_at",
+          "isletme_id",
+          "idempotency_key"
+        ],
+        "rls": true,
+        "force_rls": false
+      }
+    ],
+    "constraints": [
+      "public.isletmeler.isletmeler_pkey",
+      "public.kullanicilar.kullanicilar_id_fkey",
+      "public.kullanicilar.kullanicilar_isletme_id_fkey",
+      "public.kullanicilar.kullanicilar_pkey",
+      "public.mutation_idempotency.mutation_idempotency_pkey",
+      "public.products.chk_products_price_non_negative",
+      "public.products.chk_products_stock_non_negative",
+      "public.products.products_barcode_key",
+      "public.products.products_isletme_id_fkey",
+      "public.products.products_pkey",
+      "public.sale_items.chk_sale_items_quantity_positive",
+      "public.sale_items.chk_sale_items_unit_price_non_negative",
+      "public.sale_items.sale_items_isletme_id_fkey",
+      "public.sale_items.sale_items_pkey",
+      "public.sale_items.sale_items_product_id_fkey",
+      "public.sale_items.sale_items_sale_id_fkey",
+      "public.sales.sales_isletme_id_fkey",
+      "public.sales.sales_pkey"
+    ],
+    "indexes": [
+      "public.isletmeler.isletmeler_pkey",
+      "public.kullanicilar.idx_kullanicilar_isletme_id",
+      "public.kullanicilar.kullanicilar_pkey",
+      "public.mutation_idempotency.mutation_idempotency_pkey",
+      "public.products.idx_products_active",
+      "public.products.idx_products_active_sync",
+      "public.products.idx_products_deleted_sync",
+      "public.products.idx_products_isletme_id",
+      "public.products.idx_products_isletme_updated_at",
+      "public.products.idx_products_sync_deleted",
+      "public.products.idx_products_unique_barcode",
+      "public.products.products_barcode_key",
+      "public.products.products_pkey",
+      "public.sale_items.idx_sale_items_isletme_id",
+      "public.sale_items.idx_sale_items_product_id",
+      "public.sale_items.idx_sale_items_sale_id",
+      "public.sale_items.sale_items_pkey",
+      "public.sales.idx_sales_idempotency_key_unique",
+      "public.sales.idx_sales_isletme_id",
+      "public.sales.sales_pkey"
+    ],
+    "functions": [
+      "private.get_kullanici_isletme_id()",
+      "private.get_my_isletme_id()",
+      "private.get_my_rol()",
+      "private.prevent_self_role_or_tenant_change()",
+      "private.set_product_isletme_id()",
+      "private.set_sale_item_tenant_data()",
+      "private.set_sale_tenant_data()",
+      "public.complete_sale(p_items jsonb, p_idempotency_key text)",
+      "public.fn_set_updated_at()",
+      "public.process_product_mutation(p_idempotency_key uuid, p_isletme_id integer, p_operation_type text, p_product_id uuid, p_payload jsonb, p_base_updated_at timestamp with time zone)"
+    ],
+    "triggers": [
+      "public.kullanicilar.protect_user_role_and_tenant",
+      "public.products.set_product_isletme_id_trigger",
+      "public.products.trg_products_updated_at",
+      "public.sale_items.set_sale_item_tenant_data_trigger",
+      "public.sales.set_sale_tenant_data_trigger"
+    ],
+    "policies": [
+      "public.isletmeler.isletmeler_delete_own_business_admin",
+      "public.isletmeler.isletmeler_select_own_business",
+      "public.isletmeler.isletmeler_update_own_business_admin",
+      "public.kullanicilar.kullanicilar_select",
+      "public.kullanicilar.kullanicilar_update",
+      "public.mutation_idempotency.Allow authenticated to insert idempotency",
+      "public.mutation_idempotency.Allow authenticated to select idempotency",
+      "public.products.products_delete_own_business",
+      "public.products.products_insert_own_business",
+      "public.products.products_select_own_business",
+      "public.products.products_update_own_business",
+      "public.sale_items.sale_items_delete_own_business",
+      "public.sale_items.sale_items_insert_own_business",
+      "public.sale_items.sale_items_select_own_business",
+      "public.sale_items.sale_items_update_own_business",
+      "public.sales.sales_delete_own_business",
+      "public.sales.sales_insert_own_business",
+      "public.sales.sales_select_own_business",
+      "public.sales.sales_update_own_business"
+    ],
+    "sequences": [
+      {
+        "schema": "public",
+        "name": "isletmeler_id_seq",
+        "owner": "postgres",
+        "grantees": [
+          "anon",
+          "authenticated",
+          "service_role"
+        ],
+        "privileges": [
+          "SELECT",
+          "UPDATE",
+          "USAGE"
+        ]
+      }
+    ],
+    "schema_acl": [
+      "private: owner=postgres, app-role USAGE=false",
+      "public: owner=pg_database_owner, app-role USAGE=true"
+    ],
+    "publications": [
+      "supabase_realtime:public.products",
+      "supabase_realtime:public.sales"
+    ]
+  }
+}

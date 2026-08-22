@@ -1,0 +1,2 @@
+-- History anchor only. Production already records this version.
+-- Canonical final schema begins at 20260821090000.
