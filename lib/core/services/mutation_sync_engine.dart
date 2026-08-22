@@ -5,6 +5,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../database/offline_mutation_dao.dart';
+import '../utils/product_error_mapper.dart';
 
 // =============================================================================
 // MutationSyncEngine — Offline mutasyon kuyruğunu işler
@@ -119,6 +120,17 @@ class MutationSyncEngine {
           if (msg.contains('IDEMPOTENT_TEKRAR')) {
             await dao.updateStatus(id, 'SYNCED');
             developer.log('Mutasyon (Idempotent): id=$id', name: _logTag);
+          } else if (isTenantBarcodeUniqueViolation(e)) {
+            await dao.updateStatus(
+              id,
+              'DEAD_LETTER',
+              lastError: duplicateProductBarcodeMessage,
+            );
+            developer.log(
+              'Kalıcı barkod çakışması (DEAD_LETTER): id=$id',
+              name: _logTag,
+              level: 900,
+            );
           } else if (_isPermanentError(msg)) {
             // Yetki, Çakışma (CONFLICT), Validasyon -> DEAD_LETTER
             await dao.updateStatus(id, 'DEAD_LETTER', lastError: msg);

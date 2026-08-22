@@ -8,6 +8,7 @@ import 'package:perakende_app/core/database/local_database.dart';
 import 'package:perakende_app/core/database/local_product_dao.dart';
 import 'package:perakende_app/core/database/offline_mutation_dao.dart';
 import 'package:perakende_app/core/services/mutation_sync_engine.dart';
+import 'package:perakende_app/core/utils/product_error_mapper.dart';
 
 import '../database/sqlite_test_helper.dart';
 
@@ -210,5 +211,60 @@ void main() {
 
     final rows = await db.query('offline_product_mutations');
     expect(rows.first['status'], 'SYNCED');
+  });
+
+  test(
+      'MutationSyncEngine - tenant barcode conflict becomes friendly DEAD_LETTER',
+      () async {
+    await LocalProductDao.instance.createLocal(
+      isletmeId: isletmeId,
+      name: 'Urun 1',
+      price: 10,
+      stock: 5,
+      barcode: '12345',
+    );
+
+    Future<dynamic> mockRpc(String fn, Map<String, dynamic> params) async {
+      throw const PostgrestException(
+        message:
+            'duplicate key value violates unique constraint "idx_products_unique_barcode"',
+        code: '23505',
+      );
+    }
+
+    await MutationSyncEngine.instance
+        .syncPendingMutations(isletmeId, rpcCaller: mockRpc);
+
+    expect(await mutationDao.getPendingMutations(isletmeId), isEmpty);
+    final rows = await db.query('offline_product_mutations');
+    expect(rows.single['status'], 'DEAD_LETTER');
+    expect(rows.single['retry_count'], 0);
+    expect(rows.single['last_error'], duplicateProductBarcodeMessage);
+  });
+
+  test('MutationSyncEngine - another unique violation remains retryable',
+      () async {
+    await LocalProductDao.instance.createLocal(
+      isletmeId: isletmeId,
+      name: 'Urun 1',
+      price: 10,
+      stock: 5,
+    );
+
+    Future<dynamic> mockRpc(String fn, Map<String, dynamic> params) async {
+      throw const PostgrestException(
+        message:
+            'duplicate key value violates unique constraint "another_unique_index"',
+        code: '23505',
+      );
+    }
+
+    await MutationSyncEngine.instance
+        .syncPendingMutations(isletmeId, rpcCaller: mockRpc);
+
+    final pending = await mutationDao.getPendingMutations(isletmeId);
+    expect(pending.single['retry_count'], 1);
+    expect(pending.single['last_error'], contains('another_unique_index'));
+    expect(pending.single['last_error'], isNot(duplicateProductBarcodeMessage));
   });
 }

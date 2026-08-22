@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../../../core/utils/barcode_utils.dart';
+import '../../../../core/utils/product_error_mapper.dart';
 import '../../../../providers/product_provider.dart';
 
 class EditProductScreen extends ConsumerStatefulWidget {
@@ -30,7 +31,8 @@ class _EditProductScreenState extends ConsumerState<EditProductScreen> {
     final rawPrice = widget.product['price'];
     final price = rawPrice is num ? rawPrice.toDouble() : 0.0;
     _priceController = TextEditingController(text: price.toString());
-    _stockController = TextEditingController(text: widget.product['stock']?.toString() ?? '0');
+    _stockController =
+        TextEditingController(text: widget.product['stock']?.toString() ?? '0');
     _barcodeController = TextEditingController(text: widget.product['barcode']);
   }
 
@@ -97,7 +99,7 @@ class _EditProductScreenState extends ConsumerState<EditProductScreen> {
 
     try {
       final updateFn = ref.read(updateProductProvider);
-      
+
       final data = {
         'name': _nameController.text.trim(),
         'price': double.parse(_priceController.text),
@@ -121,7 +123,7 @@ class _EditProductScreenState extends ConsumerState<EditProductScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Hata: $e'),
+            content: Text(productMutationErrorMessage(e)),
             backgroundColor: Colors.red,
             duration: const Duration(seconds: 3),
           ),
@@ -182,11 +184,13 @@ class _EditProductScreenState extends ConsumerState<EditProductScreen> {
                         for (final barcode in barcodes) {
                           if (barcode.rawValue != null &&
                               barcode.rawValue!.isNotEmpty) {
-                            if (!BarcodeUtils.isValidBarcode(barcode.rawValue!)) {
+                            if (!BarcodeUtils.isValidBarcode(
+                                barcode.rawValue!)) {
                               ScaffoldMessenger.of(context).clearSnackBars();
                               ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(
-                                  content: Text('Geçersiz barkod: Sadece rakam içermelidir.'),
+                                  content: Text(
+                                      'Geçersiz barkod: Sadece rakam içermelidir.'),
                                   backgroundColor: Colors.red,
                                   duration: Duration(seconds: 2),
                                 ),
@@ -271,7 +275,8 @@ class _EditProductScreenState extends ConsumerState<EditProductScreen> {
                 TextFormField(
                   controller: _priceController,
                   enabled: !_isLoading,
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
                   decoration: InputDecoration(
                     labelText: 'Fiyat (₺)',
                     prefixIcon: const Icon(Icons.attach_money),
@@ -326,7 +331,8 @@ class _EditProductScreenState extends ConsumerState<EditProductScreen> {
                             width: 20,
                             child: CircularProgressIndicator(
                               strokeWidth: 2,
-                              valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                              valueColor:
+                                  AlwaysStoppedAnimation<Color>(Colors.white),
                             ),
                           )
                         : const Icon(Icons.save),

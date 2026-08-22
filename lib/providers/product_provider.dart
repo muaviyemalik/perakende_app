@@ -1,12 +1,13 @@
 import 'dart:developer' as developer;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:sqflite/sqflite.dart';
 
 import '../core/database/local_product_dao.dart';
 import '../core/providers/tenant_provider.dart';
 import '../core/services/mutation_sync_engine.dart';
 import '../core/services/product_sync_service.dart';
+import '../core/utils/product_error_mapper.dart';
 
 // Arka plan senkronizasyonunun oturum başına bir kez (veya invalidate olduğunda sonsuz döngüye girmeden)
 // çalışmasını kontrol eden basit bir bayrak.
@@ -47,7 +48,7 @@ final productByBarcodeProvider =
 
 /// Tüm ürünleri listeler (Local-First)
 ///
-/// Önce SQLite'dan okur. Cache boşsa sync işlemini bekler. 
+/// Önce SQLite'dan okur. Cache boşsa sync işlemini bekler.
 /// Cache doluysa UI'ı bekletmeden arkaplanda sync başlatır ve başarılı olursa provider'ı yeniler.
 final allProductsProvider =
     FutureProvider<List<Map<String, dynamic>>>((ref) async {
@@ -97,13 +98,20 @@ final addProductProvider = Provider((ref) {
     final stock = int.parse(data['stock'].toString());
     final barcode = data['barcode'] as String?;
 
-    await LocalProductDao.instance.createLocal(
-      isletmeId: isletmeId,
-      name: name,
-      price: price,
-      stock: stock,
-      barcode: barcode,
-    );
+    try {
+      await LocalProductDao.instance.createLocal(
+        isletmeId: isletmeId,
+        name: name,
+        price: price,
+        stock: stock,
+        barcode: barcode,
+      );
+    } on DatabaseException catch (error) {
+      if (isLocalTenantBarcodeUniqueViolation(error)) {
+        throw const DuplicateProductBarcodeException();
+      }
+      rethrow;
+    }
 
     // Sync engine tetikle
     MutationSyncEngine.instance.syncPendingMutations(isletmeId).then((_) {
@@ -127,14 +135,21 @@ final updateProductProvider = Provider((ref) {
     final stock = int.parse(data['stock'].toString());
     final barcode = data['barcode'] as String?;
 
-    await LocalProductDao.instance.updateLocal(
-      id: id,
-      isletmeId: isletmeId,
-      name: name,
-      price: price,
-      stock: stock,
-      barcode: barcode,
-    );
+    try {
+      await LocalProductDao.instance.updateLocal(
+        id: id,
+        isletmeId: isletmeId,
+        name: name,
+        price: price,
+        stock: stock,
+        barcode: barcode,
+      );
+    } on DatabaseException catch (error) {
+      if (isLocalTenantBarcodeUniqueViolation(error)) {
+        throw const DuplicateProductBarcodeException();
+      }
+      rethrow;
+    }
 
     // Sync engine tetikle
     MutationSyncEngine.instance.syncPendingMutations(isletmeId).then((_) {

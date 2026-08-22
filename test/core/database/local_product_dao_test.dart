@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:perakende_app/core/database/local_database.dart';
 import 'package:perakende_app/core/database/local_product_dao.dart';
+import 'package:perakende_app/core/utils/product_error_mapper.dart';
 
 import 'sqlite_test_helper.dart';
 
@@ -38,9 +39,9 @@ void main() {
         stock: 5,
         updatedAt: DateTime.parse('2024-01-01T10:00:00Z'),
       );
-      
+
       await dao.upsertBatch(isletmeId: 1, products: [p1]);
-      
+
       var active = await dao.getAllActive(1);
       expect(active.length, 1);
       expect(active.first.name, 'Ürün 1');
@@ -89,9 +90,9 @@ void main() {
         updatedAt: DateTime.now(),
       );
       await dao.upsertBatch(isletmeId: 1, products: [p1]);
-      
+
       await dao.softDelete(id: 'p1', isletmeId: 1);
-      
+
       final active = await dao.getAllActive(1);
       expect(active.isEmpty, true);
 
@@ -99,7 +100,9 @@ void main() {
       expect(byBarcode, isNull);
     });
 
-    test('Barcode uniqueness works: throws on conflict, different tenant allows same barcode', () async {
+    test(
+        'Barcode uniqueness works: throws on conflict, different tenant allows same barcode',
+        () async {
       final p1 = LocalProduct(
         id: 'p1',
         isletmeId: 1,
@@ -129,15 +132,20 @@ void main() {
       );
 
       await dao.upsertBatch(isletmeId: 1, products: [p1]);
-      
+
       // Aynı işletme ve barkod ile yeni ID eklendiğinde exception fırlatılmalı (silent delete olmamalı)
       try {
         await dao.upsertBatch(isletmeId: 1, products: [p2]);
         fail('Should have thrown unique constraint exception');
       } catch (e) {
         expect(e.toString(), contains('UNIQUE constraint failed'));
+        expect(e, isA<DatabaseException>());
+        expect(
+          isLocalTenantBarcodeUniqueViolation(e as DatabaseException),
+          isTrue,
+        );
       }
-      
+
       // Farklı işletme, aynı barkod sorunsuz eklenir
       await dao.upsertBatch(isletmeId: 2, products: [p3]);
 
@@ -148,6 +156,64 @@ void main() {
       final active2 = await dao.getAllActive(2);
       expect(active2.length, 1);
       expect(active2.first.id, 'p3'); // Farklı işletmede aynı barkod sorunsuz
+    });
+
+    test('Updating a product with its own barcode does not conflict', () async {
+      await dao.upsertBatch(
+        isletmeId: 1,
+        products: [
+          LocalProduct(
+            id: 'p1',
+            isletmeId: 1,
+            barcode: '12345',
+            name: 'Urun 1',
+            price: 10,
+            stock: 5,
+            updatedAt: DateTime.now(),
+          ),
+        ],
+      );
+      await dao.updateLocal(
+        id: 'p1',
+        isletmeId: 1,
+        barcode: '12345',
+        name: 'Urun 1 Guncel',
+        price: 12,
+        stock: 7,
+      );
+
+      final product = await dao.getById(id: 'p1', isletmeId: 1);
+      expect(product?.barcode, '12345');
+      expect(product?.name, 'Urun 1 Guncel');
+    });
+
+    test('A soft-deleted product barcode can be reused', () async {
+      await dao.upsertBatch(
+        isletmeId: 1,
+        products: [
+          LocalProduct(
+            id: 'p1',
+            isletmeId: 1,
+            barcode: '12345',
+            name: 'Eski Urun',
+            price: 10,
+            stock: 5,
+            updatedAt: DateTime.now(),
+          ),
+        ],
+      );
+      await dao.softDelete(id: 'p1', isletmeId: 1);
+      await dao.createLocal(
+        isletmeId: 1,
+        barcode: '12345',
+        name: 'Yeni Urun',
+        price: 15,
+        stock: 3,
+      );
+
+      final active = await dao.getAllActive(1);
+      expect(active, hasLength(1));
+      expect(active.single.name, 'Yeni Urun');
     });
 
     test('Null barcodes are allowed multiple times', () async {
@@ -171,7 +237,7 @@ void main() {
       );
 
       await dao.upsertBatch(isletmeId: 1, products: [p1, p2]);
-      
+
       final active = await dao.getAllActive(1);
       expect(active.length, 2); // Null barkodlar unique constraintine takılmaz
     });
