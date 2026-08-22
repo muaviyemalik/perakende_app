@@ -3,8 +3,6 @@ import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart' as p;
 import 'dart:io';
 
-import 'package:perakende_app/core/database/local_database.dart';
-
 import 'sqlite_test_helper.dart';
 
 void main() {

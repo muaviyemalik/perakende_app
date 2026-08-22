@@ -852,6 +852,7 @@ class _EmployeeDashboardScreenState
                                           ],
                                         ),
                                       );
+                                      if (!mounted) return;
                                       if (result != null && result > 0) {
                                         if (result > stock) {
                                           ScaffoldMessenger.of(context).showSnackBar(

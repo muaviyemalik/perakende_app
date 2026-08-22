@@ -953,6 +953,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
                                           ],
                                         ),
                                       );
+                                      if (!mounted) return;
                                       if (result != null && result > 0) {
                                         if (result > stock) {
                                           ScaffoldMessenger.of(context).showSnackBar(
