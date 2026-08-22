@@ -1,6 +1,9 @@
-import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+
+import {
+  hashNormalizedText,
+  readNormalizedUtf8,
+} from "./offline_verifier_utils.mjs";
 
 const root = resolve(import.meta.dirname, "../../../..");
 const paths = {
@@ -12,11 +15,12 @@ const paths = {
   dbTest: resolve(root, "supabase/tests/database/02_p0_emergency_rollback.test.sql"),
 };
 
-const decoder = new TextDecoder("utf-8", { fatal: true });
-const read = (path) => decoder.decode(readFileSync(path));
-const sha256 = (value) => createHash("sha256").update(value, "utf8").digest("hex");
-const text = Object.fromEntries(Object.entries(paths).map(([key, path]) => [key, read(path)]));
+const sha256 = (value) => hashNormalizedText("sha256", value);
+const text = Object.fromEntries(
+  Object.entries(paths).map(([key, path]) => [key, readNormalizedUtf8(path)]),
+);
 
+// Frozen hashes use UTF-8 text after deterministic CRLF/CR -> LF normalization.
 const frozen = {
   baseline: "5d629f32110ffa2c634df3a9b637e3f7fa842188ca3a7e4f8df07cc498ea04dc",
   p0: "1eefc022b6d0ad6a57cbc4af2fd7813a0eafd533e7455a358c0e3345fbcaadc5",

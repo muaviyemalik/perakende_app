@@ -1,16 +1,16 @@
-import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+
+import {
+  hashNormalizedText,
+  readNormalizedUtf8,
+} from "./offline_verifier_utils.mjs";
 
 const root = resolve(import.meta.dirname, "../../../..");
 const migrationsDir = resolve(root, "supabase/migrations");
 const migrationArchiveDir = resolve(root, "supabase/migration_archive");
 const canonicalDir = resolve(root, "supabase/schema/canonical/2026-08-21");
 
-const decoder = new TextDecoder("utf-8", { fatal: true });
-const readUtf8 = (path) => decoder.decode(readFileSync(path));
-const sha256 = (text) =>
-  createHash("sha256").update(text, "utf8").digest("hex");
+const sha256 = (text) => hashNormalizedText("sha256", text);
 const count = (text, pattern) => [...text.matchAll(pattern)].length;
 
 const baselinePath = resolve(
@@ -34,35 +34,36 @@ const postconditionsPath = resolve(
   "verify_p0_authorization_postconditions.sql",
 );
 
-const baseline = readUtf8(baselinePath);
-const p0 = readUtf8(p0Path);
-const testSql = readUtf8(testPath);
-const preconditions = readUtf8(preconditionsPath);
-const postconditions = readUtf8(postconditionsPath);
+const baseline = readNormalizedUtf8(baselinePath);
+const p0 = readNormalizedUtf8(p0Path);
+const testSql = readNormalizedUtf8(testPath);
+const preconditions = readNormalizedUtf8(preconditionsPath);
+const postconditions = readNormalizedUtf8(postconditionsPath);
 
+// Frozen hashes use UTF-8 text after deterministic CRLF/CR -> LF normalization.
 const checkpointHashes = {
   "20260821090000_canonical_live_baseline.sql":
     "5d629f32110ffa2c634df3a9b637e3f7fa842188ca3a7e4f8df07cc498ea04dc",
   "001_kullanicilar_rls.sql":
-    "c06fdf52e4cb129985930b5a69c00f7a1a2052dbad2051d8e7ef0a9ca98b8fbf",
+    "cd871d83fb7a5f2c65aa208ebfb666d662ee959050d788763f11e50ac21b4be3",
   "002_tenant_rls_policies.sql":
-    "a018c2fe827f63179f320d2285e5f428aa7059978eb9e0bd324cce9998ea2c87",
+    "6054a072b3ec260efe68b4a86db53f5126980081ef85dfb8bc74a2ca920088da",
   "003_complete_sale_rpc.sql":
-    "630f2d5c96dde02b1b200294e0724c3ee8a7bf096e432d210734d8942ccb7b4b",
+    "17d0ee8e5751f9713d133e2999b22b3d17e43500618e10b635796bac4b8a9cee",
   "004_indexes_and_constraints.sql":
-    "8ee21932855ce8f9386891a4824da47a84701e14b251fa40d721299a4e05d372",
+    "2aa7bfa10cabe0f582734fcbd3011b48db2cedea6134becffb28e3d2fa792683",
   "005_idempotency_key.sql":
-    "ace7cf915ad77d33082bbed245513f175bfba08a107beE957232b23b37c56958".toLowerCase(),
+    "1633de653b895d0dd5c461fb0a833755ff06905241b4ebda986301c618363f61",
   "006_secure_complete_sale_cleanup.sql":
-    "6756f57cab93f8596bab9accf366f7af95f53581975f806b3c16ea4d59f7b0d4",
+    "f3b0fbc0839ca3a7253484cb57e3c3dc578ec9fafe3e1cf4e33fdf6c7a694388",
   "007_products_updated_at_trigger.sql":
-    "d14cc1423bda62c58efb9fcef56b42ba8c9d7ac601fe797899cec6b3aaa8b6a2",
+    "cce780e54deb060efe6fb0a6e4d072a6a10ed52490afa21f6059a59a8fdf8042",
   "008_products_soft_delete.sql":
-    "3072b1f82f7182b459f277c9230be64aa74e0fd06003e7cabec9c87df3c7a16d",
+    "02baf85ef8362cc06f6ea453eda3f4f0e325e2ab5ed521462bef1e64caf690ff",
   "009_products_unique_barcode.sql":
-    "e80f87475af2defe59ee6c8d9be3cb079babdb22be3fc71e5f5c57abb1a2b066",
+    "2c29a7d7ea84d27f9eb7f54d45c20668259603ea7384c8663f2a38dee82eefc4",
   "010_product_mutations_rpc.sql":
-    "1d0d64d6220e3a41b46103a50a7f48ed5609f81fde0504b1c6048db11e5d271d",
+    "4c83baf3b99e8164c8e184e814aacc47f8e46a864662b53a1fa55d5e927958b2",
 };
 
 const checkpointResults = Object.fromEntries(
@@ -70,7 +71,7 @@ const checkpointResults = Object.fromEntries(
     const directory = file.startsWith("202608")
       ? migrationsDir
       : migrationArchiveDir;
-    const actual = sha256(readUtf8(resolve(directory, file)));
+    const actual = sha256(readNormalizedUtf8(resolve(directory, file)));
     return [file, { expected, actual, matches: expected === actual }];
   }),
 );
