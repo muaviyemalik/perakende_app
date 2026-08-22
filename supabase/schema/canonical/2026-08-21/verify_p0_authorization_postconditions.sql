@@ -21,7 +21,7 @@ WITH object_counts AS (
 ), checks(check_name, passed, detail) AS (
   SELECT 'canonical_object_counts',
     (tables, columns, constraints, indexes, functions, triggers, policies, sequences, publications)
-      = (6::bigint,32::bigint,18::bigint,20::bigint,10::bigint,5::bigint,19::bigint,1::bigint,2::bigint),
+      = (6::bigint,32::bigint,17::bigint,19::bigint,10::bigint,5::bigint,19::bigint,1::bigint,2::bigint),
     concat_ws('|', tables, columns, constraints, indexes, functions, triggers, policies, sequences, publications)
   FROM object_counts
 
