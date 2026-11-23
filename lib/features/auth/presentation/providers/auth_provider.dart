@@ -8,6 +8,7 @@ import '../../../../core/database/offline_mutation_dao.dart';
 import '../../../../core/database/sync_metadata_dao.dart';
 import '../../../../core/providers/supabase_provider.dart';
 import '../../../../core/storage/local_storage_service.dart';
+import '../../../../providers/cart_provider.dart';
 import '../../data/kullanici_servisi.dart';
 import '../../domain/kullanici_data.dart';
 
@@ -118,6 +119,8 @@ Future<void> performLogout(WidgetRef ref) async {
 
   await LocalStorageService.clearIsletmeId();
   ref.invalidate(kullaniciProvider);
+  // Ortak kasada sonraki kullanıcı önceki kasiyerin sepetini görmesin.
+  ref.invalidate(cartProvider);
   await ref.read(supabaseClientProvider).auth.signOut();
 }
 
@@ -138,6 +141,7 @@ Future<void> cleanupFailedAuthSession(WidgetRef ref) async {
 
   await LocalStorageService.clearIsletmeId();
   ref.invalidate(kullaniciProvider);
+  ref.invalidate(cartProvider);
   try {
     await ref.read(supabaseClientProvider).auth.signOut();
   } catch (_) {

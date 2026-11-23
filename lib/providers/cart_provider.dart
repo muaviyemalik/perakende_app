@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -53,8 +55,10 @@ class CartNotifier extends Notifier<List<CartItem>> {
 
   @override
   List<CartItem> build() {
-    // Otomatik internet dinleyicisi — bağlantı gelince çevrimdışı satışları senkronize et
-    Connectivity()
+    // Otomatik internet dinleyicisi — bağlantı gelince çevrimdışı satışları senkronize et.
+    // Provider her yeniden kurulduğunda (ör. çıkışta invalidate) eski dinleyici
+    // iptal edilir; aksi halde dinleyiciler birikir ve aynı sync defalarca tetiklenir.
+    final subscription = Connectivity()
         .onConnectivityChanged
         .listen((List<ConnectivityResult> results) async {
       bool hasInternet = !results.contains(ConnectivityResult.none);
@@ -68,6 +72,7 @@ class CartNotifier extends Notifier<List<CartItem>> {
         }
       }
     });
+    ref.onDispose(subscription.cancel);
 
     return [];
   }
@@ -156,6 +161,9 @@ class CartNotifier extends Notifier<List<CartItem>> {
 
   void clearCart() {
     state = [];
+    // Sepet temizlendi: sonraki satış yeni bir satıştır, yeni anahtar alır.
+    _pendingKey = null;
+    _pendingSignature = null;
   }
 
   // ---------------------------------------------------------------------------
@@ -174,6 +182,34 @@ class CartNotifier extends Notifier<List<CartItem>> {
   //   İnternet yoksa satış OfflineSaleQueue'ya eklenir. Bağlantı geldiğinde
   //   connectivity listener otomatik olarak syncAll() tetikler.
   Future<String?> completeSale() async {
+    // Çift dokunma: aynı anda ikinci bir satış çağrısı başlatılmaz.
+    if (_saleInFlight) return 'Satış işleniyor, lütfen bekleyin.';
+    _saleInFlight = true;
+    try {
+      return await _completeSale();
+    } finally {
+      _saleInFlight = false;
+    }
+  }
+
+  bool _saleInFlight = false;
+  String? _pendingKey;
+  String? _pendingSignature;
+
+  /// Aynı kullanıcı + aynı sepet içeriği için hep AYNI anahtarı döndürür.
+  /// Anahtar yalnızca sepet temizlendiğinde (satış sonuçlandığında) sıfırlanır.
+  /// Böylece kuyruğa yazma bile başarısız olsa, kasiyerin tekrar denemesi
+  /// sunucuya aynı anahtarla gider ve ikinci satış oluşmaz.
+  String _keyFor(String userId, List<Map<String, dynamic>> items) {
+    final signature = '$userId|${jsonEncode(items)}';
+    if (signature != _pendingSignature || _pendingKey == null) {
+      _pendingSignature = signature;
+      _pendingKey = _queue.generateKey();
+    }
+    return _pendingKey!;
+  }
+
+  Future<String?> _completeSale() async {
     if (state.isEmpty) return 'Sepet boş!';
 
     final client = Supabase.instance.client;
@@ -195,6 +231,11 @@ class CartNotifier extends Notifier<List<CartItem>> {
             })
         .toList();
 
+    // Anahtar denemeden ÖNCE belirlenir ve aynı sepet için tekrar kullanılır.
+    // (Eskiden her "tekrar dene"de yeni anahtar üretiliyordu ve yanıtı
+    // kaybolan satış ikinci kez kaydedilebiliyordu.)
+    final idempotencyKey = _keyFor(userId, items);
+
     // İnternet kontrolü
     final connectivityResult = await Connectivity().checkConnectivity();
     final bool isOffline = connectivityResult.contains(ConnectivityResult.none);
@@ -204,11 +245,16 @@ class CartNotifier extends Notifier<List<CartItem>> {
       // Güvenlik notu: Queue owner scope'u replay öncesi aktif oturumla
       // eşleşmelidir. Satışın authoritative isletme_id, created_by ve fiyat
       // bilgileri yine DB tarafında belirlenir.
-      await _queue.enqueue(
-        idempotencyKey: _queue.generateKey(),
-        items: items,
-        scope: scope,
-      );
+      try {
+        await _queue.enqueue(
+          idempotencyKey: idempotencyKey,
+          items: items,
+          scope: scope,
+        );
+      } catch (_) {
+        return 'İnternet bağlantısı yok ve satış telefona kaydedilemedi. '
+            'Sepet korunuyor, lütfen tekrar deneyin.';
+      }
       clearCart();
       return 'İnternet bağlantısı yok. Satış telefona kaydedildi, '
           'bağlantı geldiğinde sisteme aktarılacak.';
@@ -218,6 +264,12 @@ class CartNotifier extends Notifier<List<CartItem>> {
     final synced = await _queue.syncAll(currentScope: scope);
     if (synced > 0) {
       ref.invalidate(dashboardStatsProvider);
+    }
+
+    // Sync beklenirken oturum değiştiyse eski sepeti yeni kasiyer adına
+    // gönderme — sunucu satışı o anki kullanıcıya yazar.
+    if (client.auth.currentUser?.id != scope.userId) {
+      return 'Oturum değişti. Lütfen tekrar giriş yapın.';
     }
 
     try {
@@ -236,8 +288,6 @@ class CartNotifier extends Notifier<List<CartItem>> {
       //   • p_idempotency_key: UUID v4 — tekrar gönderim koruması.
       //   • DB'de UNIQUE constraint. Duplicate key gelirse mevcut satış döndürülür.
       // -----------------------------------------------------------------------
-      final idempotencyKey = _queue.generateKey();
-
       await client.rpc('complete_sale', params: {
         'p_items': items,
         'p_idempotency_key': idempotencyKey,
@@ -274,10 +324,50 @@ class CartNotifier extends Notifier<List<CartItem>> {
           msg.contains('SATIS_HATA:KIMLIK_DOGRULANAMADI')) {
         return 'Oturum bilgisi geçersiz. Lütfen tekrar giriş yapın.';
       }
-      return 'Satış sırasında hata oluştu: ${e.message}';
+      if (msg.contains('SATIS_HATA:')) {
+        // Sunucu satışı açıkça reddetti; işlem geri alındı, sepet korunur.
+        return 'Satış sırasında hata oluştu: ${e.message}';
+      }
+      if (OfflineSaleQueue.isAlreadyProcessedError(e)) {
+        // Aynı anahtarla eşzamanlı bir çağrı satışı zaten kaydetmiş.
+        clearCart();
+        ref.invalidate(dashboardStatsProvider);
+        return null;
+      }
+      // Satış kuralı dışı bir hata (ağ geçidi, oturum süresi vb.):
+      // satışın kaydedilip kaydedilmediği bilinemez.
+      return _queueUnknownOutcome(idempotencyKey, items, scope);
     } catch (e) {
-      return 'Satış sırasında hata oluştu: $e';
+      // Ağ hatası / zaman aşımı: istek sunucuya ulaşıp satış kaydedilmiş,
+      // yalnızca yanıt kaybolmuş olabilir.
+      return _queueUnknownOutcome(idempotencyKey, items, scope);
     }
+  }
+
+  /// Sonucu belirsiz satışı aynı anahtarla kuyruğa alır ve sepeti temizler.
+  /// Kasiyerin "tekrar dene" ile ikinci satış oluşturmasını engeller.
+  Future<String> _queueUnknownOutcome(
+    String idempotencyKey,
+    List<Map<String, dynamic>> items,
+    OfflineSaleScope scope,
+  ) async {
+    try {
+      await _queue.enqueue(
+        idempotencyKey: idempotencyKey,
+        items: items,
+        scope: scope,
+      );
+    } catch (_) {
+      // Kuyruğa da yazılamadı: sepet ve anahtar korunur. Tekrar denemek
+      // güvenlidir — aynı anahtarla gider, sunucu iki kez kaydetmez.
+      return 'Satışın sonucu doğrulanamadı ve telefona kaydedilemedi. '
+          'Sepet korunuyor; tekrar denediğinizde aynı satış olarak '
+          'gönderilecek, iki kez kaydedilmez.';
+    }
+    clearCart();
+    return 'Bağlantı sorunu nedeniyle satışın sonucu doğrulanamadı. '
+        'Satış telefona kaydedildi ve bağlantı gelince aynı kimlikle '
+        'gönderilecek; iki kez kaydedilmez. Tekrar satış yapmayın.';
   }
 
   Future<OfflineSaleScope?> _currentSaleScope() async {
