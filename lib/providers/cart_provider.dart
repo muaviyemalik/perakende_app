@@ -53,8 +53,10 @@ class CartNotifier extends Notifier<List<CartItem>> {
 
   @override
   List<CartItem> build() {
-    // Otomatik internet dinleyicisi — bağlantı gelince çevrimdışı satışları senkronize et
-    Connectivity()
+    // Otomatik internet dinleyicisi — bağlantı gelince çevrimdışı satışları senkronize et.
+    // Provider her yeniden kurulduğunda (ör. çıkışta invalidate) eski dinleyici
+    // iptal edilir; aksi halde dinleyiciler birikir ve aynı sync defalarca tetiklenir.
+    final subscription = Connectivity()
         .onConnectivityChanged
         .listen((List<ConnectivityResult> results) async {
       bool hasInternet = !results.contains(ConnectivityResult.none);
@@ -68,6 +70,7 @@ class CartNotifier extends Notifier<List<CartItem>> {
         }
       }
     });
+    ref.onDispose(subscription.cancel);
 
     return [];
   }
@@ -220,6 +223,12 @@ class CartNotifier extends Notifier<List<CartItem>> {
       ref.invalidate(dashboardStatsProvider);
     }
 
+    // Anahtar denemeden ÖNCE bir kez üretilir. Sonucu belirsiz kalan satış
+    // kuyruğa bu AYNI anahtarla girer; sunucu daha önce kaydettiyse tekrar
+    // kaydetmez. (Eskiden her "tekrar dene"de yeni anahtar üretiliyordu ve
+    // yanıtı kaybolan satış ikinci kez kaydedilebiliyordu.)
+    final idempotencyKey = _queue.generateKey();
+
     try {
       // -----------------------------------------------------------------------
       // Tek atomik RPC çağrısı — complete_sale
@@ -236,8 +245,6 @@ class CartNotifier extends Notifier<List<CartItem>> {
       //   • p_idempotency_key: UUID v4 — tekrar gönderim koruması.
       //   • DB'de UNIQUE constraint. Duplicate key gelirse mevcut satış döndürülür.
       // -----------------------------------------------------------------------
-      final idempotencyKey = _queue.generateKey();
-
       await client.rpc('complete_sale', params: {
         'p_items': items,
         'p_idempotency_key': idempotencyKey,
@@ -274,10 +281,42 @@ class CartNotifier extends Notifier<List<CartItem>> {
           msg.contains('SATIS_HATA:KIMLIK_DOGRULANAMADI')) {
         return 'Oturum bilgisi geçersiz. Lütfen tekrar giriş yapın.';
       }
-      return 'Satış sırasında hata oluştu: ${e.message}';
+      if (msg.contains('SATIS_HATA:')) {
+        // Sunucu satışı açıkça reddetti; işlem geri alındı, sepet korunur.
+        return 'Satış sırasında hata oluştu: ${e.message}';
+      }
+      if (OfflineSaleQueue.isAlreadyProcessedError(e)) {
+        // Aynı anahtarla eşzamanlı bir çağrı satışı zaten kaydetmiş.
+        clearCart();
+        ref.invalidate(dashboardStatsProvider);
+        return null;
+      }
+      // Satış kuralı dışı bir hata (ağ geçidi, oturum süresi vb.):
+      // satışın kaydedilip kaydedilmediği bilinemez.
+      return _queueUnknownOutcome(idempotencyKey, items, scope);
     } catch (e) {
-      return 'Satış sırasında hata oluştu: $e';
+      // Ağ hatası / zaman aşımı: istek sunucuya ulaşıp satış kaydedilmiş,
+      // yalnızca yanıt kaybolmuş olabilir.
+      return _queueUnknownOutcome(idempotencyKey, items, scope);
     }
+  }
+
+  /// Sonucu belirsiz satışı aynı anahtarla kuyruğa alır ve sepeti temizler.
+  /// Kasiyerin "tekrar dene" ile ikinci satış oluşturmasını engeller.
+  Future<String> _queueUnknownOutcome(
+    String idempotencyKey,
+    List<Map<String, dynamic>> items,
+    OfflineSaleScope scope,
+  ) async {
+    await _queue.enqueue(
+      idempotencyKey: idempotencyKey,
+      items: items,
+      scope: scope,
+    );
+    clearCart();
+    return 'Bağlantı sorunu nedeniyle satışın sonucu doğrulanamadı. '
+        'Satış telefona kaydedildi ve bağlantı gelince aynı kimlikle '
+        'gönderilecek; iki kez kaydedilmez. Tekrar satış yapmayın.';
   }
 
   Future<OfflineSaleScope?> _currentSaleScope() async {

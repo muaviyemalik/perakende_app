@@ -197,7 +197,7 @@ void main() {
     expect(deadLetters.single.lastError, contains('SATIS_HATA:GECERSIZ_URUN'));
   });
 
-  test('transient failure preserves scope and increments retry count',
+  test('server-side transient failure preserves scope and increments retry',
       () async {
     final queue = OfflineSaleQueue.instance;
     await _enqueue(queue);
@@ -205,7 +205,8 @@ void main() {
     final synced = await _sync(
       queue,
       scope: _scopeA,
-      rpcCaller: (_, __) async => throw Exception('network down'),
+      rpcCaller: (_, __) async =>
+          throw const PostgrestException(message: 'statement timeout'),
     );
 
     expect(synced, 0);
@@ -218,5 +219,90 @@ void main() {
     expect(persisted['retry_count'], 1);
     expect(persisted['user_id'], _userA);
     expect(persisted['isletme_id'], 10);
+  });
+
+  test('network failure never dead-letters a possibly recorded sale',
+      () async {
+    final queue = OfflineSaleQueue.instance;
+    await _enqueue(queue);
+
+    for (var i = 0; i < 5; i++) {
+      await _sync(
+        queue,
+        scope: _scopeA,
+        rpcCaller: (_, __) async => throw Exception('network down'),
+      );
+    }
+
+    expect(await queue.getPendingCount(), 1);
+    expect(await queue.getDeadLetters(), isEmpty);
+  });
+
+  test('sale enqueued while sync is running is not lost', () async {
+    final queue = OfflineSaleQueue.instance;
+    await _enqueue(queue, key: '00000000-0000-4000-8000-0000000000k1');
+
+    final synced = await _sync(
+      queue,
+      scope: _scopeA,
+      rpcCaller: (_, __) async {
+        // Sync ağ çağrısını beklerken kasiyer yeni bir offline satış yapar.
+        await _enqueue(queue, key: '00000000-0000-4000-8000-0000000000k2');
+        return {'ok': true};
+      },
+    );
+
+    expect(synced, 1);
+    expect(await queue.getPendingCount(), 1);
+    final prefs = await SharedPreferences.getInstance();
+    final remaining = jsonDecode(
+      prefs.getStringList('offline_sale_queue')!.single,
+    ) as Map<String, dynamic>;
+    expect(remaining['idempotency_key'], '00000000-0000-4000-8000-0000000000k2');
+  });
+
+  test('same idempotency key is queued only once', () async {
+    final queue = OfflineSaleQueue.instance;
+    await _enqueue(queue);
+    await _enqueue(queue);
+
+    expect(await queue.getPendingCount(), 1);
+  });
+
+  test('idempotency index violation counts as already processed', () async {
+    final queue = OfflineSaleQueue.instance;
+    await _enqueue(queue);
+
+    final synced = await _sync(
+      queue,
+      scope: _scopeA,
+      rpcCaller: (_, __) async => throw const PostgrestException(
+        code: '23505',
+        message: 'duplicate key value violates unique constraint '
+            '"idx_sales_idempotency_key_unique"',
+      ),
+    );
+
+    expect(synced, 1);
+    expect(await queue.getPendingCount(), 0);
+    expect(await queue.getDeadLetters(), isEmpty);
+  });
+
+  test('unrelated unique violation is not mistaken for success', () async {
+    final queue = OfflineSaleQueue.instance;
+    await _enqueue(queue);
+
+    final synced = await _sync(
+      queue,
+      scope: _scopeA,
+      rpcCaller: (_, __) async => throw const PostgrestException(
+        code: '23505',
+        message: 'duplicate key value violates unique constraint '
+            '"some_other_unique"',
+      ),
+    );
+
+    expect(synced, 0);
+    expect(await queue.getPendingCount(), 1);
   });
 }
