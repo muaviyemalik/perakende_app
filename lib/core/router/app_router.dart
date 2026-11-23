@@ -12,74 +12,90 @@ import '../../features/auth/presentation/screens/login_screen.dart';
 import '../../features/products/presentation/screens/test_screen.dart';
 import '../../features/admin/presentation/screens/edit_product_screen.dart';
 
-String? _homeDestination(AsyncValue<String?> kullaniciRol) {
-  return kullaniciRol.maybeWhen(
-    data: (rol) => dashboardPathForRol(rol),
-    orElse: () => null,
-  );
+/// Yalnızca admin rolünün açabileceği rotalar.
+const adminOnlyRoutes = {
+  '/admin-dashboard',
+  '/add-product',
+  '/sales-history',
+  '/edit-product',
+};
+
+/// Profil bilgisi gerektiren (giriş/şifre ekranı dışındaki) paneller.
+const _protectedRoutes = {...adminOnlyRoutes, '/employee-dashboard'};
+
+/// Router yönlendirme kuralları — test edilebilmesi için saf fonksiyon.
+///
+/// Eskiden rol yalnızca ana sayfa seçiminde kullanılıyordu; kasiyer
+/// `/admin-dashboard` gibi rotalara doğrudan gidebiliyordu. Profil
+/// yüklenirken de istenen her rotaya izin veriliyordu.
+String? resolveAppRedirect({
+  required String location,
+  required bool isLoggedIn,
+  required bool profileLoading,
+  required KullaniciLoadResult? profile,
+  Object? extra,
+}) {
+  if (!isLoggedIn) {
+    return location == '/login' ? null : '/login';
+  }
+
+  // Profil (rol) henüz bilinmiyorken korumalı bir panel açılmasın.
+  if (profileLoading) {
+    return _protectedRoutes.contains(location) ? '/' : null;
+  }
+
+  if (profile?.kullaniciYuklenemedi ?? false) {
+    return location == '/login' ? null : '/login';
+  }
+
+  final data = profile?.data;
+  if (data == null) {
+    return _protectedRoutes.contains(location) ? '/' : null;
+  }
+
+  if (!data.sifreDegistiMi) {
+    return location == '/force-change-password'
+        ? null
+        : '/force-change-password';
+  }
+
+  final home = dashboardPathForRol(data.rol);
+
+  if (location == '/login' ||
+      location == '/force-change-password' ||
+      location == '/') {
+    if (home != null && home != location) return home;
+    return location == '/' ? null : '/';
+  }
+
+  if (adminOnlyRoutes.contains(location) && data.rol != 'admin') {
+    return home ?? '/login';
+  }
+
+  // Düzenlenecek ürün olmadan (ör. yenileme / derin bağlantı) açılırsa çökmesin.
+  if (location == '/edit-product' && extra is! Map<String, dynamic>) {
+    return '/admin-dashboard';
+  }
+
+  return null;
 }
 
 final appRouterProvider = Provider<GoRouter>((ref) {
   ref.watch(authStateProvider);
-  final kullaniciRol = ref.watch(userRoleProvider);
   final kullaniciAsync = ref.watch(kullaniciProvider);
 
   return GoRouter(
     initialLocation: '/',
-    redirect: (context, state) {
-      final location = state.matchedLocation;
-      final isLoggedIn =
-          Supabase.instance.client.auth.currentUser != null;
-
-      if (!isLoggedIn) {
-        if (location == '/login') {
-          return null;
-        }
-        return '/login';
-      }
-
-      if (kullaniciAsync.isLoading) {
-        return null;
-      }
-
-      final kullaniciResult = kullaniciAsync.maybeWhen(
+    redirect: (context, state) => resolveAppRedirect(
+      location: state.matchedLocation,
+      isLoggedIn: Supabase.instance.client.auth.currentUser != null,
+      profileLoading: kullaniciAsync.isLoading,
+      profile: kullaniciAsync.maybeWhen(
         data: (result) => result,
         orElse: () => null,
-      );
-
-      if (kullaniciResult?.kullaniciYuklenemedi ?? false) {
-        if (location == '/login') {
-          return null;
-        }
-        return '/login';
-      }
-
-      final sifreDegistiMi = kullaniciResult?.data?.sifreDegistiMi;
-
-      if (sifreDegistiMi == null) {
-        return null;
-      }
-
-      if (!sifreDegistiMi) {
-        if (location == '/force-change-password') {
-          return null;
-        }
-        return '/force-change-password';
-      }
-
-      if (location == '/login' || location == '/force-change-password') {
-        return _homeDestination(kullaniciRol) ?? '/';
-      }
-
-      if (location == '/') {
-        final dashboard = _homeDestination(kullaniciRol);
-        if (dashboard != null && dashboard != location) {
-          return dashboard;
-        }
-      }
-
-      return null;
-    },
+      ),
+      extra: state.extra,
+    ),
     routes: [
       GoRoute(
         path: '/',

@@ -8,10 +8,20 @@ import '../core/providers/tenant_provider.dart';
 import '../core/services/mutation_sync_engine.dart';
 import '../core/services/product_sync_service.dart';
 import '../core/utils/product_error_mapper.dart';
+import '../features/auth/presentation/providers/auth_provider.dart';
 
 // Arka plan senkronizasyonunun oturum başına bir kez (veya invalidate olduğunda sonsuz döngüye girmeden)
 // çalışmasını kontrol eden basit bir bayrak.
 bool _hasSyncedThisSession = false;
+
+/// Ürün yazma işlemleri yalnızca admin içindir. Sunucu (RLS) zaten reddeder,
+/// ama kontrol yoksa yetkisiz ürün yerel SQLite'a yazılıp ekranda görünürdü.
+Future<void> _requireAdmin(Ref ref) async {
+  final rol = await ref.read(userRoleProvider.future);
+  if (rol != 'admin') {
+    throw Exception('Bu işlem için yönetici yetkisi gerekir.');
+  }
+}
 
 /// Barkod ile ürün arar (Local-First)
 ///
@@ -90,6 +100,7 @@ final allProductsProvider =
 /// Ürün ekler (Local-First - Offline Mümkün)
 final addProductProvider = Provider((ref) {
   return (Map<String, dynamic> data) async {
+    await _requireAdmin(ref);
     final isletmeId = await ref.read(currentIsletmeIdProvider.future);
     if (isletmeId == null) throw Exception('İşletme bilgisi bulunamadı.');
 
@@ -127,6 +138,7 @@ final addProductProvider = Provider((ref) {
 /// Ürün günceller (Local-First - Offline Mümkün)
 final updateProductProvider = Provider((ref) {
   return (String id, Map<String, dynamic> data) async {
+    await _requireAdmin(ref);
     final isletmeId = await ref.read(currentIsletmeIdProvider.future);
     if (isletmeId == null) throw Exception('İşletme bilgisi bulunamadı.');
 
@@ -165,6 +177,7 @@ final updateProductProvider = Provider((ref) {
 /// Ürünü siler (Soft-Delete - Offline Mümkün)
 final deleteProductProvider = Provider((ref) {
   return (String id) async {
+    await _requireAdmin(ref);
     final isletmeId = await ref.read(currentIsletmeIdProvider.future);
     if (isletmeId == null) throw Exception('İşletme bilgisi bulunamadı.');
 
