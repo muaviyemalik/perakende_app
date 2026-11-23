@@ -12,9 +12,10 @@
 --    kaldırılır. isletmeler INSERT yetkisi P0'da zaten kaldırılmıştı;
 --    anon/authenticated için nextval/setval'e ihtiyaç yoktur.
 --
--- NOT: Bu dosya yerel olarak çalıştırılıp test EDİLMEDİ (Supabase CLI/Docker
--- yok). Önce scratch projede uygulayıp
--- supabase/tests/database/03_password_flag_guard.test.sql ile doğrulayın.
+-- NOT: Yerel PostgreSQL 17 + Supabase taklidi (supabase/tests/local) ile tüm
+-- migration zinciri üzerinde çalıştırıldı ve 01/02/03 testleri geçti. Taklit
+-- tam bir Supabase değildir; canlıya almadan önce scratch Supabase projesinde
+-- de uygulayıp 03_password_flag_guard.test.sql ile doğrulayın.
 
 -- ---------------------------------------------------------------------------
 -- 1. Şifre bayrağı koruması
