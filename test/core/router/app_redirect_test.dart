@@ -40,6 +40,13 @@ void main() {
     expect(_redirect('/employee-dashboard', profile: kasiyer), isNull);
   });
 
+  test('case or trailing-slash variants cannot bypass the role check', () {
+    final kasiyer = _profile('kasiyer');
+    expect(_redirect('/ADMIN-DASHBOARD', profile: kasiyer),
+        '/employee-dashboard');
+    expect(_redirect('/Add-Product/', profile: kasiyer), '/employee-dashboard');
+  });
+
   test('admin can open admin routes', () {
     final admin = _profile('admin');
     expect(_redirect('/admin-dashboard', profile: admin), isNull);

@@ -29,17 +29,10 @@ ALTER TABLE private.pending_password_change OWNER TO postgres;
 REVOKE ALL ON TABLE private.pending_password_change
   FROM PUBLIC, anon, authenticated;
 
--- Bayrağı false olan mevcut kullanıcılar için şu anki şifre özetini sakla.
-INSERT INTO private.pending_password_change (user_id, password_hash_snapshot)
-SELECT k.id, u.encrypted_password
-  FROM public.kullanicilar k
-  JOIN auth.users u ON u.id = k.id
- WHERE coalesce(k.sifre_degisti_mi, false) = false
-ON CONFLICT (user_id) DO UPDATE
-  SET password_hash_snapshot = EXCLUDED.password_hash_snapshot,
-      captured_at = now();
-
--- Bayrak false olduğunda (yeni kullanıcı / admin sıfırlaması) anlık görüntü al.
+-- Anlık görüntü YALNIZCA şu anlarda alınır: yeni kullanıcı (bayrak false) ve
+-- bayrağın true -> false sıfırlanması (admin reseti). false -> false gibi
+-- değişmeyen yazımlar anlık görüntüyü yenilemez; yenilerse kullanıcının
+-- az önce değiştirdiği şifre "geçici şifre" sanılır ve onayı reddedilirdi.
 CREATE OR REPLACE FUNCTION private.capture_password_snapshot()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -47,6 +40,12 @@ CREATE OR REPLACE FUNCTION private.capture_password_snapshot()
  SET search_path TO ''
 AS $function$
 begin
+  if tg_op = 'UPDATE'
+     and coalesce(old.sifre_degisti_mi, false)
+         = coalesce(new.sifre_degisti_mi, false) then
+    return new;
+  end if;
+
   if coalesce(new.sifre_degisti_mi, false) = false then
     insert into private.pending_password_change (user_id, password_hash_snapshot)
     select new.id, u.encrypted_password
@@ -76,6 +75,7 @@ AS $function$
 declare
   v_snapshot text;
   v_current text;
+  found_snapshot boolean;
 begin
   if (select auth.uid()) = old.id
      and coalesce(old.sifre_degisti_mi, false) = false
@@ -84,14 +84,22 @@ begin
     select p.password_hash_snapshot into v_snapshot
       from private.pending_password_change p
      where p.user_id = old.id;
+    found_snapshot := found;
 
     select u.encrypted_password into v_current
       from auth.users u
      where u.id = old.id;
 
-    -- Anlık görüntü yoksa ya da şifre özeti değişmediyse reddet.
-    if v_snapshot is null or v_current is null
-       or v_current = v_snapshot then
+    -- Anlık görüntü satırı yoksa: şifrenin değiştiği kanıtlanamaz, reddet.
+    if not found_snapshot then
+      raise exception 'SIFRE_HATA:SIFRE_DEGISMEDI'
+        using hint = 'Önce şifrenizi değiştirin.';
+    end if;
+
+    -- Görüntü NULL ise (hesabın başta şifresi yoktu) yeni bir şifre
+    -- belirlenmiş olması yeterli; değilse özet değişmiş olmalı.
+    if v_current is null
+       or (v_snapshot is not null and v_current = v_snapshot) then
       raise exception 'SIFRE_HATA:SIFRE_DEGISMEDI'
         using hint = 'Önce şifrenizi değiştirin.';
     end if;
@@ -112,6 +120,17 @@ DROP TRIGGER IF EXISTS capture_password_snapshot ON public.kullanicilar;
 CREATE TRIGGER capture_password_snapshot
   AFTER INSERT OR UPDATE OF sifre_degisti_mi ON public.kullanicilar
   FOR EACH ROW EXECUTE FUNCTION private.capture_password_snapshot();
+
+-- Mevcut kullanıcılar için backfill — trigger'lar KURULDUKTAN SONRA ve tablo
+-- kilitliyken yapılır; arada eklenen bir profil anlık görüntüsüz kalmaz.
+LOCK TABLE public.kullanicilar IN SHARE ROW EXCLUSIVE MODE;
+
+INSERT INTO private.pending_password_change (user_id, password_hash_snapshot)
+SELECT k.id, u.encrypted_password
+  FROM public.kullanicilar k
+  JOIN auth.users u ON u.id = k.id
+ WHERE coalesce(k.sifre_degisti_mi, false) = false
+ON CONFLICT (user_id) DO NOTHING;
 
 -- ---------------------------------------------------------------------------
 -- 2. Sequence yetkileri

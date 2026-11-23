@@ -319,7 +319,16 @@ class OfflineSaleQueue {
             continue;
           }
 
-          // Sunucunun döndürdüğü diğer hatalar → retry sayacını artır
+          // Veritabanı hatası değilse (SQLSTATE 5 karakterlidir; ağ geçidinin
+          // 502/504 gibi HTTP kodları 3 karakter) sonuç belirsizdir: ağ hatası
+          // gibi davran, retry sayma, dead letter'a atma.
+          if ((e.code ?? '').length != 5) {
+            sale.lastError = msg;
+            retried[sale.idempotencyKey] = sale;
+            continue;
+          }
+
+          // Veritabanının döndürdüğü diğer hatalar → retry sayacını artır
           sale.retryCount++;
           sale.lastError = msg;
 
@@ -430,7 +439,9 @@ class OfflineSaleQueue {
   Future<void> _saveQueue(List<QueuedSale> queue) async {
     final prefs = await SharedPreferences.getInstance();
     final raw = queue.map((s) => jsonEncode(s.toJson())).toList();
-    await prefs.setStringList(_pendingKey, raw);
+    if (!await prefs.setStringList(_pendingKey, raw)) {
+      throw StateError('Offline satış kuyruğu kaydedilemedi.');
+    }
   }
 
   Future<void> _appendDeadLetters(List<QueuedSale> newDeadLetters) async {
@@ -440,7 +451,10 @@ class OfflineSaleQueue {
       ...existing,
       ...newDeadLetters.map((s) => jsonEncode(s.toJson())),
     ];
-    await prefs.setStringList(_deadLetterKey, appended);
+    if (!await prefs.setStringList(_deadLetterKey, appended)) {
+      // Dead letter yazılamadıysa satış kuyruktan SİLİNMEMELİ: hata fırlat.
+      throw StateError('Dead letter kuyruğu kaydedilemedi.');
+    }
   }
 
   /// Bu satış (aynı idempotency_key) sunucuda zaten işlenmiş mi?

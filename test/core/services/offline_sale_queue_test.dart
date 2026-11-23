@@ -205,8 +205,10 @@ void main() {
     final synced = await _sync(
       queue,
       scope: _scopeA,
-      rpcCaller: (_, __) async =>
-          throw const PostgrestException(message: 'statement timeout'),
+      rpcCaller: (_, __) async => throw const PostgrestException(
+        code: '57014',
+        message: 'canceling statement due to statement timeout',
+      ),
     );
 
     expect(synced, 0);
@@ -231,6 +233,26 @@ void main() {
         queue,
         scope: _scopeA,
         rpcCaller: (_, __) async => throw Exception('network down'),
+      );
+    }
+
+    expect(await queue.getPendingCount(), 1);
+    expect(await queue.getDeadLetters(), isEmpty);
+  });
+
+  test('gateway 504 is treated as unknown outcome, never dead-lettered',
+      () async {
+    final queue = OfflineSaleQueue.instance;
+    await _enqueue(queue);
+
+    for (var i = 0; i < 5; i++) {
+      await _sync(
+        queue,
+        scope: _scopeA,
+        rpcCaller: (_, __) async => throw const PostgrestException(
+          code: '504',
+          message: 'Gateway Timeout',
+        ),
       );
     }
 

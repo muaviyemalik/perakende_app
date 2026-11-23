@@ -58,6 +58,9 @@ $test$;
 -- User 2: change password, then flag -> allowed, snapshot removed.
 UPDATE auth.users SET encrypted_password = 'hash-new-2'
  WHERE id = '40000000-0000-0000-0000-000000000002';
+-- A no-op false -> false write must NOT refresh the snapshot to the new hash.
+UPDATE public.kullanicilar SET sifre_degisti_mi = false
+ WHERE id = '40000000-0000-0000-0000-000000000002';
 SELECT set_config('request.jwt.claim.sub', '40000000-0000-0000-0000-000000000002', true);
 UPDATE public.kullanicilar SET sifre_degisti_mi = true
  WHERE id = '40000000-0000-0000-0000-000000000002';

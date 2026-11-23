@@ -35,6 +35,14 @@ String? resolveAppRedirect({
   required KullaniciLoadResult? profile,
   Object? extra,
 }) {
+  // go_router rotaları büyük/küçük harfe duyarsız eşleştirir: "/ADMIN-DASHBOARD"
+  // admin ekranını açar. Kontroller aynı şekilde normalleştirilmiş yol
+  // üzerinde yapılmazsa rol kontrolü atlatılabilir.
+  location = location.toLowerCase();
+  if (location.length > 1 && location.endsWith('/')) {
+    location = location.substring(0, location.length - 1);
+  }
+
   if (!isLoggedIn) {
     return location == '/login' ? null : '/login';
   }
